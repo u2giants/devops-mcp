@@ -1,11 +1,10 @@
 services:
   devops-mcp:
-    build: .
+    image: 'ghcr.io/u2giants/devops-mcp:main'
+    pull_policy: always
     restart: always
     privileged: true
     pid: host
-    ports:
-      - '8765:8765'
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /:/host:rw
