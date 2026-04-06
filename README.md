@@ -2,7 +2,22 @@
 
 MCP server that gives AI agents full access to the VPS for devops and sysadmin tasks.
 
-**Live URL:** `https://mcp.designflow.app/mcp`
+**Live URL:** `https://mcp.designflow.app/mcp`  
+**Status page:** `https://mcp.designflow.app/`
+
+---
+
+## Documentation
+
+| Doc | What it covers |
+|---|---|
+| [docs/architecture.md](docs/architecture.md) | How all the pieces fit together, nsenter, middleware, Traefik |
+| [docs/server.md](docs/server.md) | Every section of server.py explained |
+| [docs/deployment.md](docs/deployment.md) | The `docker run` command, adding tokens, networking, volumes |
+| [docs/cicd.md](docs/cicd.md) | GitHub Actions pipeline, image tags, known limitations |
+| [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
+| [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
+| [docs/gotchas.md](docs/gotchas.md) | Things that will bite you — read before making changes |
 
 ---
 
