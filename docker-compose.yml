@@ -1,0 +1,23 @@
+services:
+  devops-mcp:
+    build: .
+    restart: always
+    privileged: true
+    pid: host
+    ports:
+      - '8765:8765'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/host:rw
+      - mcp-audit:/audit
+    environment:
+      - PORT=8765
+      - HOST_ROOT=/host
+      - AUDIT_LOG_PATH=/audit/mcp-audit.log
+      - 'TOKEN_CLAUDE=${TOKEN_CLAUDE}'
+      - 'TOKEN_GEMINI=${TOKEN_GEMINI}'
+      - 'TOKEN_CHATGPT=${TOKEN_CHATGPT}'
+      - 'TOKEN_CODEX=${TOKEN_CODEX}'
+
+volumes:
+  mcp-audit: null
