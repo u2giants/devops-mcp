@@ -30,7 +30,9 @@ from fastmcp.server.middleware import Middleware as McpMiddleware, MiddlewareCon
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse
+from starlette.routing import Mount, Route
+from starlette.applications import Starlette
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -99,8 +101,12 @@ def _audit(agent: str, tool: str, args: dict | None, ok: bool, duration_ms: int,
 # ASGI auth middleware — checks Bearer token on every HTTP request
 # ---------------------------------------------------------------------------
 
+PUBLIC_PATHS = {"/", "/status"}
+
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        if request.url.path in PUBLIC_PATHS:
+            return await call_next(request)
         auth = request.headers.get("authorization", "")
         if not auth.startswith("Bearer "):
             return JSONResponse({"error": "Missing Authorization: Bearer <token>"}, status_code=401)
@@ -433,20 +439,170 @@ def view_audit_log(lines: int = 50) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Status page
+# ---------------------------------------------------------------------------
+
+def _read_recent_audit(n: int = 30) -> list[dict]:
+    try:
+        p = Path(AUDIT_LOG_PATH)
+        if not p.exists():
+            return []
+        lines = p.read_text(encoding="utf-8").strip().splitlines()
+        entries = []
+        for line in reversed(lines[-n:]):
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                pass
+        return entries
+    except Exception:
+        return []
+
+
+async def status_page(request: Request) -> HTMLResponse:
+    entries = _read_recent_audit(30)
+    agents = sorted(TOKENS.values())
+    tools = sorted(mcp._tool_manager._tools.keys())
+
+    rows = ""
+    for e in entries:
+        ts = e.get("ts", "")
+        time_str = ts[11:19] if len(ts) >= 19 else ts
+        agent = e.get("agent", "?")
+        tool = e.get("tool", "?")
+        args = e.get("args", {})
+        # Show the most meaningful arg: command, container, service, path
+        detail = (
+            args.get("command")
+            or args.get("container")
+            or args.get("service")
+            or args.get("path")
+            or (", ".join(f"{k}={v}" for k, v in args.items()) if args else "")
+        )
+        if len(detail) > 60:
+            detail = detail[:57] + "…"
+        ok = e.get("ok", True)
+        status_icon = "✓" if ok else "✗"
+        status_class = "ok" if ok else "fail"
+        ms = e.get("duration_ms", "")
+        rows += f"""
+        <tr>
+          <td class="ts">{time_str}</td>
+          <td class="agent">{agent}</td>
+          <td class="tool">{tool}</td>
+          <td class="detail">{detail}</td>
+          <td class="{status_class}">{status_icon}</td>
+          <td class="ms">{ms}ms</td>
+        </tr>"""
+
+    agent_pills = "".join(f'<span class="pill">{a}</span>' for a in agents)
+    tool_list = "".join(f'<li>{t}</li>' for t in tools)
+    total_calls = len(entries)
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="30">
+  <title>DevOps MCP — Status</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 2rem; }}
+    h1 {{ font-size: 1.4rem; font-weight: 600; color: #f8fafc; margin-bottom: 0.25rem; }}
+    .subtitle {{ color: #64748b; font-size: 0.85rem; margin-bottom: 2rem; }}
+    .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem; }}
+    @media (max-width: 700px) {{ .grid {{ grid-template-columns: 1fr; }} }}
+    .card {{ background: #1e2130; border: 1px solid #2d3148; border-radius: 10px; padding: 1.25rem; }}
+    .card h2 {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: .08em;
+                color: #64748b; margin-bottom: 0.75rem; }}
+    .pill {{ display: inline-block; background: #2d3148; color: #a5b4fc;
+             border-radius: 999px; padding: 0.2rem 0.7rem; font-size: 0.8rem;
+             margin: 0.2rem; font-weight: 500; }}
+    ul {{ list-style: none; }}
+    ul li {{ color: #94a3b8; font-size: 0.85rem; padding: 0.15rem 0;
+             border-bottom: 1px solid #1e2130; }}
+    ul li::before {{ content: "⚙ "; color: #4f6ef7; }}
+    .status-dot {{ width: 8px; height: 8px; border-radius: 50%;
+                   background: #22c55e; display: inline-block; margin-right: 6px;
+                   box-shadow: 0 0 6px #22c55e; animation: pulse 2s infinite; }}
+    @keyframes pulse {{ 0%,100% {{ opacity:1; }} 50% {{ opacity:.5; }} }}
+    .log-card {{ background: #1e2130; border: 1px solid #2d3148; border-radius: 10px;
+                 padding: 1.25rem; overflow-x: auto; }}
+    .log-card h2 {{ font-size: 0.75rem; text-transform: uppercase; letter-spacing: .08em;
+                    color: #64748b; margin-bottom: 0.75rem; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 0.82rem; }}
+    th {{ text-align: left; color: #475569; font-weight: 500; padding: 0.4rem 0.6rem;
+          border-bottom: 1px solid #2d3148; font-size: 0.75rem; text-transform: uppercase; }}
+    td {{ padding: 0.45rem 0.6rem; border-bottom: 1px solid #1a1f2e; vertical-align: middle; }}
+    tr:last-child td {{ border-bottom: none; }}
+    tr:hover td {{ background: #252840; }}
+    .ts {{ color: #475569; font-family: monospace; white-space: nowrap; }}
+    .agent {{ color: #a5b4fc; font-weight: 500; }}
+    .tool {{ color: #7dd3fc; font-family: monospace; }}
+    .detail {{ color: #94a3b8; font-family: monospace; }}
+    .ok {{ color: #22c55e; text-align: center; }}
+    .fail {{ color: #f87171; text-align: center; }}
+    .ms {{ color: #475569; text-align: right; font-size: 0.75rem; }}
+    .empty {{ color: #475569; font-style: italic; padding: 1rem 0; }}
+    .refresh {{ color: #475569; font-size: 0.75rem; margin-top: 1.5rem; text-align: right; }}
+  </style>
+</head>
+<body>
+  <h1><span class="status-dot"></span>DevOps MCP Server</h1>
+  <p class="subtitle">mcp.designflow.app &nbsp;·&nbsp; refreshes every 30s</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Connected Agents</h2>
+      {agent_pills if agent_pills else '<span style="color:#475569">None configured</span>'}
+    </div>
+    <div class="card">
+      <h2>Available Tools</h2>
+      <ul>{tool_list}</ul>
+    </div>
+  </div>
+
+  <div class="log-card">
+    <h2>Recent Activity &nbsp;<span style="color:#475569;font-weight:400">last {total_calls} shown</span></h2>
+    {"<table><thead><tr><th>Time</th><th>Agent</th><th>Tool</th><th>Detail</th><th></th><th>ms</th></tr></thead><tbody>" + rows + "</tbody></table>" if entries else '<p class="empty">No activity recorded yet.</p>'}
+  </div>
+
+  <p class="refresh">Auto-refreshes every 30 seconds</p>
+</body>
+</html>"""
+    return HTMLResponse(html)
+
+
+# ---------------------------------------------------------------------------
 # App entrypoint
 # ---------------------------------------------------------------------------
 
-def create_app():
-    """Create the Starlette ASGI app with auth middleware."""
+def create_app() -> Starlette:
+    """Create the Starlette ASGI app with status page and auth middleware."""
     asgi_middleware = []
     if TOKENS:
         asgi_middleware.append(ASGIMiddleware(AuthMiddleware))
 
-    return mcp.http_app(
+    mcp_app = mcp.http_app(
         stateless_http=True,
         transport="http",
         middleware=asgi_middleware,
     )
+
+    # Mount the status page on / and the MCP app on everything else.
+    # Both share the same auth middleware (which exempts PUBLIC_PATHS).
+    from starlette.middleware import Middleware as StarletteMiddleware
+    app = Starlette(
+        routes=[
+            Route("/", status_page),
+            Route("/status", status_page),
+            Mount("/", app=mcp_app),
+        ],
+        middleware=asgi_middleware,
+    )
+    return app
 
 
 app = create_app()
