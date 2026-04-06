@@ -145,6 +145,14 @@ class AuditMiddleware(McpMiddleware):
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP("devops-mcp", middleware=[AuditMiddleware()])
+_registered_tools: list[str] = []
+
+
+def _tool(fn):
+    """Decorator: register with FastMCP and track name for the status page."""
+    wrapped = mcp.tool(fn)
+    _registered_tools.append(fn.__name__)
+    return wrapped
 
 # ---------------------------------------------------------------------------
 # Host command execution helpers
@@ -221,7 +229,7 @@ def _run_on_host(
 # Tools
 # ---------------------------------------------------------------------------
 
-@mcp.tool
+@_tool
 def health() -> dict[str, Any]:
     """Server health and configuration. Call this first to understand the server."""
     return {
@@ -234,7 +242,7 @@ def health() -> dict[str, Any]:
     }
 
 
-@mcp.tool
+@_tool
 def run_command(
     command: str,
     cwd: str = "/",
@@ -250,7 +258,7 @@ def run_command(
     return _run_on_host(command, cwd=cwd, timeout=timeout)
 
 
-@mcp.tool
+@_tool
 def read_file(path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
     """
     Read a text file from the host filesystem.
@@ -281,7 +289,7 @@ def read_file(path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@mcp.tool
+@_tool
 def write_file(path: str, content: str, make_backup: bool = True) -> dict[str, Any]:
     """
     Write a text file on the host filesystem. Creates parent directories if needed.
@@ -312,7 +320,7 @@ def write_file(path: str, content: str, make_backup: bool = True) -> dict[str, A
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@mcp.tool
+@_tool
 def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 200) -> dict[str, Any]:
     """
     List files and directories on the host filesystem.
@@ -361,7 +369,7 @@ def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@mcp.tool
+@_tool
 def docker_ps(all_containers: bool = False) -> dict[str, Any]:
     """List Docker containers. Set all_containers=true to include stopped ones."""
     flag = "-a" if all_containers else ""
@@ -370,7 +378,7 @@ def docker_ps(all_containers: bool = False) -> dict[str, Any]:
     )
 
 
-@mcp.tool
+@_tool
 def docker_logs(container: str, tail: int = 100) -> dict[str, Any]:
     """Get logs from a Docker container."""
     tail = max(1, min(tail, 5000))
@@ -378,7 +386,7 @@ def docker_logs(container: str, tail: int = 100) -> dict[str, Any]:
     return _run_on_host(f"docker logs --tail {tail} {safe}", timeout=30)
 
 
-@mcp.tool
+@_tool
 def docker_action(container: str, action: str = "restart") -> dict[str, Any]:
     """
     Perform an action on a Docker container.
@@ -391,7 +399,7 @@ def docker_action(container: str, action: str = "restart") -> dict[str, Any]:
     return _run_on_host(f"docker {action} {safe}", timeout=60)
 
 
-@mcp.tool
+@_tool
 def service_status(service: str = "") -> dict[str, Any]:
     """
     Check systemd service status. If service is empty, lists all running services.
@@ -405,7 +413,7 @@ def service_status(service: str = "") -> dict[str, Any]:
     return _run_on_host(f"systemctl status {safe} --no-pager", timeout=30)
 
 
-@mcp.tool
+@_tool
 def service_action(service: str, action: str = "restart") -> dict[str, Any]:
     """
     Manage a systemd service. Actions: start, stop, restart, enable, disable, reload
@@ -417,7 +425,7 @@ def service_action(service: str, action: str = "restart") -> dict[str, Any]:
     return _run_on_host(f"systemctl {action} {safe}", timeout=60)
 
 
-@mcp.tool
+@_tool
 def view_audit_log(lines: int = 50) -> dict[str, Any]:
     """View recent entries from the MCP audit log. Shows who did what and when."""
     lines = max(1, min(lines, 500))
@@ -462,7 +470,7 @@ def _read_recent_audit(n: int = 30) -> list[dict]:
 async def status_page(request: Request) -> HTMLResponse:
     entries = _read_recent_audit(30)
     agents = sorted(TOKENS.values())
-    tools = sorted(mcp._tool_manager._tools.keys())
+    tools = sorted(_registered_tools)
 
     rows = ""
     for e in entries:
