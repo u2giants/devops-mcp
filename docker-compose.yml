@@ -83,7 +83,8 @@ services:
           -H "Authorization: Bearer $$TOKEN" \
           -H "Content-Type: application/json" \
           -d "{\"name\":\"devops-mcp\",\"url\":\"http://devops-mcp:8765/mcp\",\"transport\":\"STREAMABLEHTTP\",\"auth_type\":\"bearer\",\"auth_token\":\"$$DEVOPS_MCP_TOKEN\"}")
-        echo "Registration HTTP $$RESULT: $$(cat /tmp/reg.json | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"name\",d.get(\"message\",\"?\")))')"
+        NAME=$$(python3 -c "import sys,json,os; d=json.load(open('/tmp/reg.json')); print(d.get('name',d.get('message','?')))")
+        echo "Registration HTTP $$RESULT: $$NAME"
 
   cf-cloudflared:
     image: cloudflare/cloudflared:latest
