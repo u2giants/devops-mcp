@@ -54,6 +54,6 @@ jobs:
 
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
             ai@$VPS_HOST \
-            "sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR pull devops-mcp && sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR up -d --no-deps devops-mcp"
+            "sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR pull devops-mcp && sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR up -d"
 
           echo "Deploy complete"
