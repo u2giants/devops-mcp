@@ -36,16 +36,28 @@ Tokens are **not** stored in GitHub Secrets or any committed file.
 
 ## Networking
 
-The container is on the `vj5f76xet05bxwdq4utw1kho` Docker bridge network, which
-also contains `coolify-proxy` (Traefik). Traefik watches for containers with
-`traefik.enable=true` and routes `mcp.designflow.app` to this container.
+Routing uses a Cloudflare Tunnel — the same pattern as `ocgate` and `ocmc`.
 
-Port 8765 is the MCP server's internal listen port. Coolify maps it to the host for
-direct access, but all public traffic goes through Traefik on 443.
+```
+client → Cloudflare edge → cloudflared container → devops-mcp:8765
+```
 
-DNS: `mcp.designflow.app` → A record → `178.156.180.212` (VPS IP), managed in
-Cloudflare. Traffic hits Traefik directly (not via Cloudflare proxy/tunnel) — the
-orange cloud is off. This avoids proxy timeout issues with MCP's SSE connections.
+The `cloudflared` sidecar in `docker-compose.yml` opens an outbound tunnel to
+Cloudflare using `CLOUDFLARE_TUNNEL_TOKEN`. No inbound ports need to be open on
+the VPS firewall.
+
+| Item | Value |
+|---|---|
+| Tunnel name | `devops-mcp` |
+| Tunnel ID | `aa2bbb47-3907-485d-a0fa-61f57af478d8` |
+| Tunnel ingress | `mcp.designflow.app` → `http://devops-mcp:8765` |
+
+DNS: `mcp.designflow.app` → CNAME → `aa2bbb47-3907-485d-a0fa-61f57af478d8.cfargotunnel.com`
+(proxied, orange cloud on). Managed in Cloudflare DNS under `designflow.app`.
+
+`CLOUDFLARE_TUNNEL_TOKEN` is stored in Coolify's environment variables for this
+service (not in code). To rotate: generate a new tunnel token in the Cloudflare
+dashboard → update in Coolify env vars → restart.
 
 ---
 

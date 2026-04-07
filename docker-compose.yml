@@ -17,6 +17,16 @@ services:
       - 'TOKEN_GEMINI=${TOKEN_GEMINI}'
       - 'TOKEN_CHATGPT=${TOKEN_CHATGPT}'
       - 'TOKEN_CODEX=${TOKEN_CODEX}'
+      - 'TOKEN_ROOCODE=${TOKEN_ROOCODE}'
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - devops-mcp
+    restart: unless-stopped
 
 volumes:
   mcp-audit: null

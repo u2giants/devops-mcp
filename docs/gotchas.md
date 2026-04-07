@@ -35,6 +35,17 @@ Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 
+## 4. Routing goes through Cloudflare Tunnel — not Traefik
+
+`mcp.designflow.app` is routed via the `cloudflared` sidecar container, identical
+to `ocgate` and `ocmc`. DNS is a proxied CNAME to the tunnel ID, not an A record
+to the VPS IP. Traefik/Coolify proxy plays no role in routing public traffic.
+
+If the endpoint returns 503, the issue is almost always the `cloudflared` container,
+not Coolify configuration. Check with: `docker logs devops-mcp-cloudflared-1`
+
+---
+
 ## 4. The old gemini-mcp service is still on disk
 
 `/etc/systemd/system/gemini-mcp.service` and `/home/ai/gemini-mcp/` still exist.
