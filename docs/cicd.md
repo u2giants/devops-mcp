@@ -12,12 +12,11 @@ GitHub Actions (.github/workflows/deploy.yml)
       ├── docker push ghcr.io/u2giants/devops-mcp:main
       ├── docker push ghcr.io/u2giants/devops-mcp:sha-<commit>
       │
-      └── GET https://coolify.designflow.app/api/v1/services/vj5f76xet05bxwdq4utw1kho/restart
-                │
-                ▼
-          Coolify runs docker compose pull + up
-          Pulls ghcr.io/u2giants/devops-mcp:main
-          Container recreated with new image → live
+      └── SSH into VPS as ai@178.156.180.212
+            │
+            └── docker compose pull devops-mcp
+                docker compose up -d --no-deps devops-mcp
+                (updates ONLY devops-mcp — cloudflared/contextforge untouched)
 ```
 
 Push to `main` is the only deployment action. No manual steps on the server.
@@ -35,9 +34,12 @@ Set on `u2giants/devops-mcp` (Settings → Secrets → Actions):
 
 | Secret | Value | Used for |
 |---|---|---|
-| `COOLIFY_API_TOKEN` | Coolify API bearer token | Authenticating the redeploy call |
-| `COOLIFY_BASE_URL` | `https://coolify.designflow.app` | Coolify API base URL |
-| `COOLIFY_SERVICE_UUID` | `vj5f76xet05bxwdq4utw1kho` | Which service to redeploy |
+| `VPS_SSH_KEY` | Private key for `github-actions-devops-mcp` | SSH into VPS to run docker compose |
+| `VPS_HOST` | `178.156.180.212` | VPS IP for SSH |
+
+The corresponding public key is in `/home/ai/.ssh/authorized_keys` on the VPS.
+
+`GITHUB_TOKEN` is automatic — no setup needed. Used to push to GHCR.
 
 `GITHUB_TOKEN` is automatic — no setup needed. Used to push to GHCR.
 
