@@ -609,6 +609,7 @@ def create_app() -> Starlette:
             Mount("/", app=mcp_app),
         ],
         middleware=asgi_middleware,
+        lifespan=mcp_app.router.lifespan_context,
     )
     return app
 

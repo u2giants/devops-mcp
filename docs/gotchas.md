@@ -4,54 +4,34 @@ Things that will bite you if you don't know about them.
 
 ---
 
-## 1. Deploying a new image does NOT happen automatically
+## 1. Never edit code on the server
 
-**This is the most important gotcha.**
+**This is the most important rule.**
 
-The CI/CD pipeline builds and pushes a new Docker image, then calls the Coolify API
-to "restart" the service. But "restart" means Coolify restarts the existing container
-with the image it already has — it does not pull the new image.
+GitHub is the source of truth. Do not SSH in and edit `server.py` or any other source
+file directly. Changes made on the server are overwritten on the next Coolify redeploy.
 
-**The result:** you push a fix, CI shows green, nothing changes on the server.
-
-**The fix:** after CI finishes, SSH in and:
-```bash
-docker pull ghcr.io/u2giants/devops-mcp:main
-# re-run the docker run command from docs/deployment.md
-```
-
-**Why it works this way:** The container is started with `docker run`, not via
-Coolify's compose orchestration. Coolify's restart API can only restart what Coolify
-originally started via compose. Our container is a "managed" orphan — Coolify sees it
-via labels but doesn't truly own it.
-
-**Future fix:** Write a deploy script at `/home/ai/devops-mcp/deploy.sh` and have
-GitHub Actions call it via SSH. That script would pull the new image and re-run
-the `docker run` command automatically.
+**The fix:** edit locally → commit to `main` → push. CI builds the image, Coolify
+pulls it, done.
 
 ---
 
-## 2. Adding a token requires a container restart
+## 2. Adding a token does NOT require a code push
 
-Tokens are read from environment variables at startup. There is no hot-reload.
+Tokens are Coolify environment variables, not code. To add or rotate a token:
 
-If you add `TOKEN_NEWTOOL` to Coolify's env vars UI and click Restart, the container
-restarts — but with whatever env vars it was originally started with via `docker run`.
-Coolify's env var UI does not feed back into `docker run`.
+Coolify UI → DevOps MCP → Environment Variables → add `TOKEN_<NAME>` → Save
 
-**The fix:** add the new token to the `docker run` command in [deployment.md](deployment.md)
-and re-run it.
+Coolify restarts the container with the new env var automatically. No commit needed.
 
 ---
 
-## 3. The `docker run` command is the source of truth
+## 3. The docker-compose.yml in this repo is the source of truth for container config
 
-The container's configuration — its env vars, volumes, network, labels, capabilities —
-lives in the `docker run` command in [deployment.md](deployment.md). Not in Coolify's UI.
-Not in the `docker-compose.yml` (which exists for reference but isn't what Coolify runs).
-
-If you change something in Coolify's UI (like adding an env var), that change does
-not take effect unless you also update and re-run the `docker run` command.
+Coolify uses `docker-compose.yml` to define volumes, capabilities, mounts, and image.
+If you need to change container configuration (e.g. add a volume, change a capability),
+edit `docker-compose.yml` and push to `main`. Do not change these things in the
+Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 

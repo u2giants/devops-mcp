@@ -12,35 +12,34 @@ GitHub Actions (.github/workflows/deploy.yml)
       ├── docker push ghcr.io/u2giants/devops-mcp:main
       ├── docker push ghcr.io/u2giants/devops-mcp:sha-<commit>
       │
-      └── POST https://coolify.designflow.app/api/v1/services/vj5f76xet05bxwdq4utw1kho/restart
+      └── GET https://coolify.designflow.app/api/v1/services/vj5f76xet05bxwdq4utw1kho/restart
                 │
                 ▼
-          Coolify restarts the existing container
-          (does NOT pull new image — see note below)
+          Coolify runs docker compose pull + up
+          Pulls ghcr.io/u2giants/devops-mcp:main
+          Container recreated with new image → live
 ```
 
-## Important limitation
+Push to `main` is the only deployment action. No manual steps on the server.
 
-The Coolify "restart" API call restarts the existing container. It does **not**:
-- Pull the new image from GHCR
-- Recreate the container
+## Rules
 
-This means after a push, you must manually pull the new image and re-run the
-`docker run` command to actually deploy it. See [deployment.md](deployment.md)
-for the full command.
+- **No branches.** Commit directly to `main`.
+- **No live edits on the server.** GitHub is the source of truth.
+- **Coolify pulls pre-built images.** It does not build from source.
+- **All secrets in GitHub Secrets.** Never in committed files.
 
-This is a known gap. A future improvement would be to write a small deploy script
-on the VPS and have GitHub Actions call it via SSH instead of using the Coolify API.
+## GitHub Secrets
 
-## GitHub secrets
-
-Set on the `u2giants/devops-mcp` repo:
+Set on `u2giants/devops-mcp` (Settings → Secrets → Actions):
 
 | Secret | Value | Used for |
 |---|---|---|
-| `COOLIFY_API_TOKEN` | Coolify API bearer token | Authenticating the restart call |
-| `COOLIFY_BASE_URL` | `https://coolify.designflow.app` | Base URL for Coolify API |
-| `COOLIFY_SERVICE_UUID` | `vj5f76xet05bxwdq4utw1kho` | Which service to restart |
+| `COOLIFY_API_TOKEN` | Coolify API bearer token | Authenticating the redeploy call |
+| `COOLIFY_BASE_URL` | `https://coolify.designflow.app` | Coolify API base URL |
+| `COOLIFY_SERVICE_UUID` | `vj5f76xet05bxwdq4utw1kho` | Which service to redeploy |
+
+`GITHUB_TOKEN` is automatic — no setup needed. Used to push to GHCR.
 
 ## Image tags
 
@@ -48,29 +47,26 @@ Every push to `main` produces two tags:
 - `:main` — always the latest build from main
 - `:sha-<full_commit_sha>` — immutable, for rollbacks
 
-To roll back to a previous version, find the commit SHA you want, then use
-`ghcr.io/u2giants/devops-mcp:sha-<that_sha>` in the `docker run` command.
+Rollback: update the `image:` field in `docker-compose.yml` to `ghcr.io/u2giants/devops-mcp:sha-<that_sha>`, commit to main, push.
+
+## Token management
+
+Agent tokens (`TOKEN_CLAUDE`, `TOKEN_GEMINI`, etc.) are stored as environment variables
+in Coolify's service configuration — **not** in GitHub Secrets and not in any committed
+file. To add or rotate a token:
+
+1. In Coolify UI: DevOps MCP → Environment Variables → add/edit `TOKEN_<NAME>` → Save
+2. Coolify automatically restarts the container with the new env var
+
+No code change or push needed for token changes.
 
 ## Build cache
 
 The workflow uses GitHub Actions cache (`type=gha`) for Docker layer caching.
-Subsequent builds of unchanged layers are near-instant. The first build after a
-new runner picks up the job, or after a long gap, will be slower (~2 min).
+Unchanged layers build in seconds. First build after a long gap is ~2 min.
 
-## Branch strategy
+## Upcoming: Node.js deprecation (deadline: June 2026)
 
-No branches. All changes go directly to `main`. Each push triggers a build.
-This matches the pattern used by all other projects in this setup (openclaw,
-twenty-server, etc.).
-
-## Node.js deprecation warning
-
-GitHub Actions currently shows:
-```
-Node.js 20 actions are deprecated... Actions will be forced to run with Node.js 24
-by default starting June 2nd, 2026.
-```
-
-This affects `docker/build-push-action@v6`, `docker/login-action@v3`, and
-`docker/setup-buildx-action@v3`. Before June 2026, update these to their latest
-versions (v7+, v4+, v4+ respectively) to avoid build failures.
+The workflow uses `docker/build-push-action@v6`, `docker/login-action@v3`, and
+`docker/setup-buildx-action@v3` which run on Node.js 20. GitHub forces Node.js 24
+starting June 2, 2026. Update these to v7+/v4+/v4+ before then.
