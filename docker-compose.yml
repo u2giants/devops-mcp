@@ -31,6 +31,7 @@ services:
   contextforge:
     image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC2
     restart: unless-stopped
+    user: root
     volumes:
       - cf-data:/data
     environment:
@@ -70,6 +71,7 @@ services:
     environment:
       - 'JWT_SECRET_KEY=${CF_JWT_SECRET}'
       - 'CF_ADMIN_EMAIL=${CF_ADMIN_EMAIL}'
+      - 'DEVOPS_MCP_TOKEN=${TOKEN_CLAUDE}'
     command:
       - sh
       - -c
@@ -77,12 +79,11 @@ services:
         TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token \
           --username $$CF_ADMIN_EMAIL --exp 10080 \
           --secret "$$JWT_SECRET_KEY" 2>/dev/null)
-        curl -sf -X POST http://contextforge:4444/gateways \
+        RESULT=$$(curl -s -o /tmp/reg.json -w "%{http_code}" -X POST http://contextforge:4444/gateways \
           -H "Authorization: Bearer $$TOKEN" \
           -H "Content-Type: application/json" \
-          -d '{"name":"devops-mcp","url":"http://devops-mcp:8765/mcp","transport":"STREAMABLEHTTP"}' \
-          && echo "devops-mcp registered with ContextForge" \
-          || echo "Registration skipped (already exists)"
+          -d "{\"name\":\"devops-mcp\",\"url\":\"http://devops-mcp:8765/mcp\",\"transport\":\"STREAMABLEHTTP\",\"auth_type\":\"bearer\",\"auth_token\":\"$$DEVOPS_MCP_TOKEN\"}")
+        echo "Registration HTTP $$RESULT: $$(cat /tmp/reg.json | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get(\"name\",d.get(\"message\",\"?\")))')"
 
   cf-cloudflared:
     image: cloudflare/cloudflared:latest
