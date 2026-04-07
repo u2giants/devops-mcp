@@ -23,10 +23,76 @@ services:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
     environment:
-      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+      - 'TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}'
     depends_on:
       - devops-mcp
     restart: unless-stopped
 
+  contextforge:
+    image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC2
+    restart: unless-stopped
+    volumes:
+      - cf-data:/data
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4444
+      - DATABASE_URL=sqlite:////data/mcp.db
+      - CACHE_TYPE=memory
+      - 'JWT_SECRET_KEY=${CF_JWT_SECRET}'
+      - 'AUTH_ENCRYPTION_SECRET=${CF_AUTH_SECRET}'
+      - BASIC_AUTH_USER=admin
+      - 'BASIC_AUTH_PASSWORD=${CF_ADMIN_PASSWORD}'
+      - 'PLATFORM_ADMIN_EMAIL=${CF_ADMIN_EMAIL}'
+      - 'PLATFORM_ADMIN_PASSWORD=${CF_ADMIN_PASSWORD}'
+      - PLATFORM_ADMIN_FULL_NAME=Platform Administrator
+      - MCPGATEWAY_UI_ENABLED=true
+      - MCPGATEWAY_ADMIN_API_ENABLED=true
+      - SSRF_ALLOW_PRIVATE_NETWORKS=true
+      - SSRF_ALLOW_LOCALHOST=true
+      - SSRF_DNS_FAIL_CLOSED=false
+      - SECURE_COOKIES=false
+      - TRANSPORT_TYPE=streamablehttp
+    depends_on:
+      - devops-mcp
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4444/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  contextforge-register:
+    image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC2
+    restart: "no"
+    depends_on:
+      contextforge:
+        condition: service_healthy
+    environment:
+      - 'JWT_SECRET_KEY=${CF_JWT_SECRET}'
+      - 'CF_ADMIN_EMAIL=${CF_ADMIN_EMAIL}'
+    command:
+      - sh
+      - -c
+      - |
+        TOKEN=$$(python3 -m mcpgateway.utils.create_jwt_token \
+          --username $$CF_ADMIN_EMAIL --exp 10080 \
+          --secret "$$JWT_SECRET_KEY" 2>/dev/null)
+        curl -sf -X POST http://contextforge:4444/gateways \
+          -H "Authorization: Bearer $$TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{"name":"devops-mcp","url":"http://devops-mcp:8765/mcp","transport":"STREAMABLEHTTP"}' \
+          && echo "devops-mcp registered with ContextForge" \
+          || echo "Registration skipped (already exists)"
+
+  cf-cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      - 'TUNNEL_TOKEN=${CF_GW_TUNNEL_TOKEN}'
+    depends_on:
+      - contextforge
+    restart: unless-stopped
+
 volumes:
   mcp-audit: null
+  cf-data: null
