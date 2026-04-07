@@ -35,6 +35,15 @@ Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 
+## 5. Coolify's restart API doesn't create new containers — only restarts existing ones
+
+If you add a new service to `docker-compose.yml` (e.g. a sidecar), Coolify's
+`/restart` endpoint will not create it. You need to trigger a full redeploy via
+the Coolify UI (Redeploy button) or run `docker compose up -d` manually in
+`/data/coolify/services/vj5f76xet05bxwdq4utw1kho/`.
+
+---
+
 ## 4. Routing goes through Cloudflare Tunnel — not Traefik
 
 `mcp.designflow.app` is routed via the `cloudflared` sidecar container, identical
