@@ -76,3 +76,8 @@ Currently tokens are loaded from env vars at container startup. To add a token y
 must restart the container (brief downtime). A future improvement would be to load
 tokens from a JSON file mounted as a volume, with a file-watcher that reloads on
 change — no restart needed. This would make token management much simpler.
+
+## Connecting from Windsurf or Roo Code
+
+These clients use SSE transport with query-parameter auth instead of HTTP + header.
+See [windsurf-roo-setup.md](windsurf-roo-setup.md) for configuration examples.

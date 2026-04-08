@@ -3,6 +3,7 @@
 MCP server that gives AI agents full access to the VPS for devops and sysadmin tasks.
 
 **Live URL:** `https://mcp.designflow.app/mcp`  
+**SSE URL:** `https://mcp.designflow.app/sse/sse?token=YOUR_TOKEN_HERE`  
 **Status page:** `https://mcp.designflow.app/`
 
 ---
@@ -70,6 +71,9 @@ Every MCP client needs two things:
 
 The header is configured once in the AI tool's settings. After that the AI sends it
 automatically with every request.
+
+For Windsurf and Roo Code, use the SSE setup documented in
+[docs/windsurf-roo-setup.md](docs/windsurf-roo-setup.md).
 
 ---
 

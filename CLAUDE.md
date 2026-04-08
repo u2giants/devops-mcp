@@ -20,6 +20,7 @@ edit code locally
 ## Live URL
 
 `https://mcp.designflow.app/mcp`
+`https://mcp.designflow.app/sse/sse?token=YOUR_TOKEN_HERE`
 
 ## What this is
 
@@ -33,6 +34,7 @@ Docker container managed by Coolify. Authenticates callers via per-agent bearer 
 | [docs/cicd.md](docs/cicd.md) | Full deployment pipeline, GitHub Secrets, image tags |
 | [docs/deployment.md](docs/deployment.md) | Coolify config, adding tokens, networking |
 | [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
+| [docs/windsurf-roo-setup.md](docs/windsurf-roo-setup.md) | Windsurf & Roo Code MCP config |
 | [docs/server.md](docs/server.md) | server.py walkthrough |
 | [docs/architecture.md](docs/architecture.md) | nsenter, middleware, Traefik |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and fixes |

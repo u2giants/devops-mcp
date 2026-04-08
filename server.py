@@ -107,10 +107,14 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path in PUBLIC_PATHS:
             return await call_next(request)
+        token = None
         auth = request.headers.get("authorization", "")
-        if not auth.startswith("Bearer "):
-            return JSONResponse({"error": "Missing Authorization: Bearer <token>"}, status_code=401)
-        token = auth[7:]
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+        elif request.query_params.get("token"):
+            token = request.query_params.get("token")
+        if token is None:
+            return JSONResponse({"error": "Missing auth: provide Authorization header or ?token= param"}, status_code=401)
         agent = TOKENS.get(token)
         if agent is None:
             return JSONResponse({"error": "Invalid token"}, status_code=403)
@@ -559,7 +563,7 @@ async def status_page(request: Request) -> HTMLResponse:
 </head>
 <body>
   <h1><span class="status-dot"></span>DevOps MCP Server</h1>
-  <p class="subtitle">mcp.designflow.app &nbsp;·&nbsp; refreshes every 30s</p>
+    <p class="subtitle">mcp.designflow.app &nbsp;·&nbsp; HTTP: /mcp &nbsp;·&nbsp; SSE: /sse &nbsp;·&nbsp; refreshes every 30s</p>
 
   <div class="grid">
     <div class="card">
@@ -593,23 +597,28 @@ def create_app() -> Starlette:
     if TOKENS:
         asgi_middleware.append(ASGIMiddleware(AuthMiddleware))
 
-    mcp_app = mcp.http_app(
+    http_app = mcp.http_app(
         stateless_http=True,
         transport="http",
         middleware=asgi_middleware,
     )
 
+    sse_app = mcp.http_app(
+        transport="sse",
+        middleware=asgi_middleware,
+    )
+
     # Mount the status page on / and the MCP app on everything else.
     # Both share the same auth middleware (which exempts PUBLIC_PATHS).
-    from starlette.middleware import Middleware as StarletteMiddleware
     app = Starlette(
         routes=[
             Route("/", status_page),
             Route("/status", status_page),
-            Mount("/", app=mcp_app),
+            Mount("/sse", app=sse_app),
+            Mount("/", app=http_app),
         ],
         middleware=asgi_middleware,
-        lifespan=mcp_app.router.lifespan_context,
+        lifespan=http_app.router.lifespan_context,
     )
     return app
 

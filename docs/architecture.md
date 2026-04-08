@@ -28,7 +28,7 @@ Traefik (coolify-proxy container, port 443)
     ▼
 devops-mcp Docker container  (port 8765 inside coolify network)
     │
-    ├── Auth middleware   checks Bearer token → maps to agent name
+    ├── Auth middleware   checks Bearer token or ?token= → maps to agent name
     ├── Audit middleware  logs every tool call to /audit/mcp-audit.log
     ├── FastMCP server    speaks MCP protocol, exposes tools
     │
@@ -81,14 +81,25 @@ This only works because:
 
 ### 4. Authentication (ASGI middleware)
 
-Every HTTP request to `/mcp` must include `Authorization: Bearer <token>`.
+Every authenticated request must include either `Authorization: Bearer <token>`
+or `?token=<token>` in the URL.
 
 Tokens are environment variables named `TOKEN_<NAME>`:
 - `TOKEN_CLAUDE=abc...` → agent name `claude`
 - `TOKEN_ROOCODE=xyz...` → agent name `roocode`
 
 At startup the server reads all `TOKEN_*` env vars into a dict `{token: agent_name}`.
-The ASGI middleware checks this dict on every request and rejects unknown tokens.
+The ASGI middleware checks the `Authorization` header first, then falls back to the
+`token` query parameter and rejects unknown tokens.
+
+### 4.1 Dual transport endpoints
+
+The server exposes both transports:
+- HTTP at `/mcp`
+- SSE at `/sse`
+
+Windsurf and Roo Code can connect using the SSE URL with `?token=`. Existing HTTP
+clients continue using the bearer-token header on `/mcp`.
 
 The status page at `/` and `/status` is exempt from auth — it's public and read-only.
 
