@@ -35,7 +35,7 @@ Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 
-## 5. Coolify's restart API doesn't create new containers — only restarts existing ones
+## 4. Coolify's restart API doesn't create new containers — only restarts existing ones
 
 If you add a new service to `docker-compose.yml` (e.g. a sidecar), Coolify's
 `/restart` endpoint will not create it. You need to trigger a full redeploy via
@@ -44,7 +44,7 @@ the Coolify UI (Redeploy button) or run `docker compose up -d` manually in
 
 ---
 
-## 4. Routing goes through Cloudflare Tunnel — not Traefik
+## 5. Routing goes through Cloudflare Tunnel — not Traefik
 
 `mcp.designflow.app` is routed via the `cloudflared` sidecar container, identical
 to `ocgate` and `ocmc`. DNS is a proxied CNAME to the tunnel ID, not an A record
@@ -55,7 +55,7 @@ not Coolify configuration. Check with: `docker logs devops-mcp-cloudflared-1`
 
 ---
 
-## 4. The old gemini-mcp service is still on disk
+## 6. The old gemini-mcp service is still on disk
 
 `/etc/systemd/system/gemini-mcp.service` and `/home/ai/gemini-mcp/` still exist.
 The service is stopped and disabled. Do not re-enable it — it will conflict with
@@ -66,7 +66,7 @@ one runs as root with full host access. They are not compatible.
 
 ---
 
-## 5. `write_file` overwrites the entire file
+## 7. `write_file` overwrites the entire file
 
 The `write_file` tool replaces the entire file contents. It is not a patch or diff.
 If an AI calls `write_file("/etc/nginx/nginx.conf", content)`, it must provide the
@@ -78,7 +78,7 @@ Over time, directories with frequently-edited files will fill with `.bak` files.
 
 ---
 
-## 6. `run_command` output is capped at 60,000 characters
+## 8. `run_command` output is capped at 60,000 characters
 
 Commands that produce very long output (e.g. `cat large_file`, `docker logs` with
 thousands of lines, `find / -name "*.log"`) will be truncated. The response includes
@@ -89,7 +89,7 @@ through it, or use options to limit output (`tail -n 100`, `grep` filters, etc.)
 
 ---
 
-## 7. The status page is unauthenticated
+## 9. The status page is unauthenticated
 
 `https://mcp.designflow.app/` is publicly readable. It shows:
 - Which agent names are registered (but not their tokens)
@@ -103,7 +103,7 @@ in command-line args, etc.).
 
 ---
 
-## 8. nsenter silently fails without `pid: host`
+## 10. nsenter silently fails without `pid: host`
 
 If the container is started without `--pid host`, `nsenter --target 1` will enter
 the container's own init process (PID 1 inside the container, not the host). Commands
@@ -118,7 +118,7 @@ run_command("hostname")
 
 ---
 
-## 9. The `cwd` parameter in `run_command` is not fully wired through nsenter
+## 11. The `cwd` parameter in `run_command` is not fully wired through nsenter
 
 The `run_command` tool accepts a `cwd` parameter. In container mode, the intended
 working directory is passed as an env var (`NSENTER_CWD`) but the nsenter command
@@ -132,17 +132,17 @@ run_command("cd /home/ai/myproject && git status")
 
 ---
 
-## 10. Double middleware application
+## 12. Double middleware application
 
 In `create_app()`, the auth middleware is applied to both the outer Starlette app
-and the inner FastMCP app. This was needed to make the public status page work while
+and the inner FastMCP app. This is needed to make the public status page work while
 keeping the MCP endpoint protected. If you add new routes, be aware that they inherit
 middleware from the outer app, which exempts `PUBLIC_PATHS`. Routes you add will be
 protected by default unless you add their paths to `PUBLIC_PATHS`.
 
 ---
 
-## 11. Coolify's service UUID must never change
+## 13. Coolify's service UUID must never change
 
 The UUID `vj5f76xet05bxwdq4utw1kho` appears in:
 - Container name
@@ -159,7 +159,7 @@ manually).
 
 ---
 
-## 12. GitHub Actions Node.js deprecation (deadline: June 2026)
+## 14. GitHub Actions Node.js deprecation (deadline: June 2026)
 
 The workflow uses `docker/build-push-action@v6`, `docker/login-action@v3`, and
 `docker/setup-buildx-action@v3` which run on Node.js 20. GitHub will force Node.js 24
@@ -168,7 +168,7 @@ build failures.
 
 ---
 
-## 13. There is no access control — only identity logging
+## 15. There is no access control — only identity logging
 
 Any agent with a valid token can do anything. Tokens are for identifying who did
 what in the audit log, not for limiting what they can do. There is no way to give

@@ -2,9 +2,25 @@
 
 MCP server that gives AI agents full access to the VPS for devops and sysadmin tasks.
 
-**Live URL:** `https://mcp.designflow.app/mcp`  
-**SSE URL:** `https://mcp.designflow.app/sse/sse?token=YOUR_TOKEN_HERE`  
+**Live URL:** `https://mcp.designflow.app/mcp`
 **Status page:** `https://mcp.designflow.app/`
+
+---
+
+## Quick orientation — what answers where
+
+| URL | Domain | Auth? | What it does |
+|---|---|---|---|
+| `https://mcp.designflow.app/` | `mcp.designflow.app` | No | HTML status page — shows registered agents, recent audit activity, tool list |
+| `https://mcp.designflow.app/status` | `mcp.designflow.app` | No | Same status page (alternate path) |
+| `https://mcp.designflow.app/mcp` | `mcp.designflow.app` | **Yes** | MCP Streamable HTTP endpoint — all AI clients POST JSON-RPC here |
+| `https://mcp.designflow.app/mcp?token=...` | `mcp.designflow.app` | Query param | Same `/mcp` endpoint, token in URL instead of header |
+
+**All traffic goes through Cloudflare Tunnel.** The domain `mcp.designflow.app` is a proxied CNAME to the tunnel — there is no direct A record to the VPS IP. If you get a **Cloudflare 502 Bad Gateway**, the tunnel can't reach the container (infra problem), not a token/auth issue.
+
+### ContextForge vs MCP server
+
+The **ContextForge** sidecar (`contextforge-register`) is a separate process in the same Docker Compose stack. It registers the MCP server's tools with the ContextForge platform so they appear in the ContextForge UI. It is **not** the MCP server itself — AI clients still connect to `/mcp` on `mcp.designflow.app`. The status page at `/` is served by the MCP server, not ContextForge.
 
 ---
 
@@ -12,7 +28,7 @@ MCP server that gives AI agents full access to the VPS for devops and sysadmin t
 
 | Doc | What it covers |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | How all the pieces fit together, nsenter, middleware, Traefik |
+| [docs/architecture.md](docs/architecture.md) | How all the pieces fit together, nsenter, middleware, Cloudflare Tunnel |
 | [docs/server.md](docs/server.md) | Every section of server.py explained |
 | [docs/deployment.md](docs/deployment.md) | The `docker run` command, adding tokens, networking, volumes |
 | [docs/cicd.md](docs/cicd.md) | GitHub Actions pipeline, image tags, known limitations |
@@ -72,8 +88,7 @@ Every MCP client needs two things:
 The header is configured once in the AI tool's settings. After that the AI sends it
 automatically with every request.
 
-For Windsurf and Roo Code, use the SSE setup documented in
-[docs/windsurf-roo-setup.md](docs/windsurf-roo-setup.md).
+For Windsurf and Roo Code, see [docs/windsurf-roo-setup.md](docs/windsurf-roo-setup.md).
 
 ---
 
@@ -124,3 +139,6 @@ File operations transparently prefix paths with `/host`.
 
 The server detects it is inside a container via `/.dockerenv` and switches to host-access
 mode automatically.
+
+Public traffic reaches the container through **Cloudflare Tunnel** (not Traefik).
+See [docs/architecture.md](docs/architecture.md) for the full diagram.

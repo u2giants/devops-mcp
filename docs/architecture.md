@@ -16,27 +16,36 @@ by most major AI tools. The AI connects to the MCP server, calls a "tool" (like
 ## Bird's-eye view
 
 ```
-AI tool (Claude, Gemini, Roo Code, etc.)
+AI tool (Claude, Gemini, Roo Code, Windsurf, etc.)
     │
-    │  HTTPS  ── Authorization: Bearer <token>
+    │  HTTPS POST  ── Authorization: Bearer <token>  OR  ?token=<secret>
     ▼
-Cloudflare DNS (mcp.designflow.app → 178.156.180.212)
+Cloudflare DNS (mcp.designflow.app → proxied CNAME → Cloudflare Tunnel)
     │
     ▼
-Traefik (coolify-proxy container, port 443)
-    │  routes Host: mcp.designflow.app to container
+cloudflared sidecar container  (tunnels traffic into the VPS)
+    │
     ▼
-devops-mcp Docker container  (port 8765 inside coolify network)
+devops-mcp Docker container  (port 8765)
     │
     ├── Auth middleware   checks Bearer token or ?token= → maps to agent name
     ├── Audit middleware  logs every tool call to /audit/mcp-audit.log
-    ├── FastMCP server    speaks MCP protocol, exposes tools
+    ├── FastMCP server    speaks MCP Streamable HTTP, exposes tools
     │
     ├── nsenter ──────────────────────────────────────────────────────┐
     │   (enters host PID/mount/net namespaces)                        │
     │                                                             HOST SYSTEM
     ├── /var/run/docker.sock ─────────────────────────────────── Docker daemon
     └── /host (= host's /) ───────────────────────────────────── Full filesystem
+```
+
+Sidecar in the same Docker Compose stack:
+```
+contextforge-register  (sidecar container)
+    │
+    │  Registers tools with ContextForge platform
+    ▼
+ContextForge cloud  (external service)
 ```
 
 ---
@@ -46,7 +55,7 @@ devops-mcp Docker container  (port 8765 inside coolify network)
 ### 1. The MCP server (Python, FastMCP)
 
 `server.py` — a Python process using the [FastMCP](https://gofastmcp.com) library.
-FastMCP handles the MCP wire protocol (JSON-RPC over HTTP/SSE). The server defines
+FastMCP handles the MCP wire protocol (JSON-RPC over Streamable HTTP). The server defines
 "tools" — Python functions that the AI can call.
 
 Runs inside a Docker container. Listens on port 8765.
@@ -92,14 +101,14 @@ At startup the server reads all `TOKEN_*` env vars into a dict `{token: agent_na
 The ASGI middleware checks the `Authorization` header first, then falls back to the
 `token` query parameter and rejects unknown tokens.
 
-### 4.1 Dual transport endpoints
+### 4.1 Transport endpoint
 
-The server exposes both transports:
-- HTTP at `/mcp`
-- SSE at `/sse`
+The server exposes a single transport:
+- Streamable HTTP at `/mcp`
 
-Windsurf and Roo Code can connect using the SSE URL with `?token=`. Existing HTTP
-clients continue using the bearer-token header on `/mcp`.
+All clients (Windsurf, Roo Code, Claude, Gemini, ChatGPT, Codex) connect via
+`POST /mcp` using Streamable HTTP. Auth is via `Authorization: Bearer <token>`
+header or `?token=` query parameter.
 
 The status page at `/` and `/status` is exempt from auth — it's public and read-only.
 
@@ -133,17 +142,35 @@ The FastMCP audit middleware calls `current_agent.get()` when a tool is called.
 Because FastMCP processes the MCP request in the same async context as the HTTP
 request, the contextvar carries the agent identity through.
 
-### 7. Traefik routing
+### 7. Cloudflare Tunnel routing
 
-The container is on the `coolify` Docker network. Traefik (the `coolify-proxy`
-container) watches Docker for containers with `traefik.enable=true` labels and
-automatically routes HTTPS traffic to them.
+Public traffic reaches the container through a **Cloudflare Tunnel** (cloudflared
+sidecar), not through Traefik. The domain `mcp.designflow.app` is a proxied CNAME
+pointing to the tunnel ID in Cloudflare DNS — there is no direct A record to the VPS IP.
 
-The container's labels configure:
-- HTTP → HTTPS redirect
-- HTTPS routing for `Host: mcp.designflow.app`
-- Let's Encrypt TLS certificate (via `certresolver: letsencrypt`)
-- Target port 8765
+The container still has Traefik labels (from Coolify), but they are not used for
+public traffic routing. Traefik/Coolify proxy plays no role in routing HTTPS requests
+to this service.
+
+The tunnel forwards HTTPS traffic directly to the container on port 8765 inside
+the Docker network.
+
+### 7.1. ContextForge sidecar
+
+The `contextforge-register` container is a sidecar defined in the same
+`docker-compose.yml` stack. It is **not** the MCP server and does not handle
+AI client connections. Its sole job is to register the MCP server's tools
+with the ContextForge platform so they appear in the ContextForge UI.
+
+| Property | Value |
+|---|---|
+| Image | `ghcr.io/u2giants/contextforge-register` |
+| Connects to | `http://devops-mcp:8765/mcp` (internal Docker network) |
+| Transport | `STREAMABLEHTTP` |
+| Direction | Outbound only — pushes tool metadata to ContextForge cloud |
+
+If the ContextForge registration fails, it does not affect the MCP server's
+ability to serve AI clients. The sidecar is fire-and-forget at startup.
 
 ### 8. CI/CD
 

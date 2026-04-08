@@ -1,5 +1,48 @@
 # Troubleshooting
 
+## Cloudflare 502 / 503 errors
+
+**Symptom:** Browser or AI client gets `502 Bad Gateway` or `503 Service Unavailable` from Cloudflare.
+
+**This is an infrastructure problem, not a token or auth issue.** A Cloudflare 502 means the Cloudflare Tunnel cannot reach the backend container. The token could be perfectly valid — the request never gets that far.
+
+**What to check:**
+
+1. **Is the cloudflared sidecar running?**
+   ```bash
+   docker ps | grep cloudflared
+   ```
+   If it's not running, the tunnel is down. Restart it:
+   ```bash
+   docker compose up -d cloudflared
+   ```
+
+2. **Is the devops-mcp container running?**
+   ```bash
+   docker ps | grep devops-mcp
+   ```
+   If the container is down, the tunnel has nothing to forward to.
+
+3. **Check cloudflared logs:**
+   ```bash
+   docker logs devops-mcp-cloudflared-1 2>&1 | tail -30
+   ```
+   Look for connection refused, timeout, or tunnel registration errors.
+
+4. **Can you reach the container directly?**
+   ```bash
+   curl -s http://localhost:8765/
+   ```
+   If this works but the public URL returns 502, the tunnel is the problem.
+   If this also fails, the container itself is the problem.
+
+**Common causes:**
+- Container was restarted by Coolify but the cloudflared sidecar lost its connection
+- Docker network issue between cloudflared and the MCP container
+- Cloudflare Tunnel token expired or was revoked in the Cloudflare dashboard
+
+---
+
 ## Quick health check
 
 ```bash
@@ -13,8 +56,7 @@ curl -s https://mcp.designflow.app/
 # Is auth working?
 curl -s https://mcp.designflow.app/mcp -X POST \
   -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer wl6Uxf9dlZ981eNF_d8M7EQXbkI56fvtZV-5i0nWa0k" \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"health","arguments":{}}}'
 # Should return JSON with "server":"devops-mcp"
 ```
