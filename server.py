@@ -30,7 +30,7 @@ from fastmcp.server.middleware import Middleware as McpMiddleware, MiddlewareCon
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from starlette.responses import HTMLResponse, JSONResponse
 from starlette.routing import Mount, Route
 from starlette.applications import Starlette
 from starlette.types import ASGIApp
@@ -115,9 +115,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             token = auth[7:]
         elif request.query_params.get("token"):
             token = request.query_params.get("token")
-
-        if token is None and request.url.path.startswith("/sse") and request.method == "POST":
-            token = request.headers.get("x-mcp-token") or request.headers.get("x-token")
 
         if token is None:
             return JSONResponse({"error": "Missing auth: provide Authorization header or ?token= param"}, status_code=401)
@@ -571,7 +568,7 @@ async def status_page(request: Request) -> HTMLResponse:
 </head>
 <body>
   <h1><span class="status-dot"></span>DevOps MCP Server</h1>
-    <p class="subtitle">mcp.designflow.app &nbsp;·&nbsp; HTTP: /mcp &nbsp;·&nbsp; SSE: /sse &nbsp;·&nbsp; refreshes every 30s</p>
+    <p class="subtitle">mcp.designflow.app &nbsp;·&nbsp; Streamable HTTP: /mcp &nbsp;·&nbsp; refreshes every 30s</p>
 
   <div class="grid">
     <div class="card">
@@ -595,67 +592,27 @@ async def status_page(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-# ---------------------------------------------------------------------------
-# SSE — /sse/messages[?] redirects
-# FastMCP SSE mounts at /sse, so the message endpoint is /sse/messages.
-# Starlette's Mount("/sse", ...) issues a 307 redirect to /sse/messages/ when
-# a POST arrives at /sse/messages without trailing slash. The redirect is a
-# POST->GET by default (browser default), which breaks MCP.
-# We handle this with explicit routes:
-#   /sse/messages  (no slash) → validate auth, redirect to /sse/messages/  (preserves headers+query)
-#   /sse/messages/ (trailing) → let the SSE app handle it
-# ---------------------------------------------------------------------------
-
-    async def sse_messages_redirect(request: Request) -> Response:
-        # Extract token and re-attach as Authorization header before redirecting
-        token = request.query_params.get("token")
-        if not token:
-            auth = request.headers.get("authorization", "")
-            if auth.startswith("Bearer "):
-                token = auth[7:]
-            else:
-                token = request.headers.get("x-mcp-token") or request.headers.get("x-token")
-
-        if token:
-            # Redirect to /sse/messages/ with token as Authorization header
-            from starlette.responses import RedirectResponse
-            return RedirectResponse(
-                url="/sse/messages/?token=" + token,
-                status_code=307,
-            )
-        # No token — let AuthMiddleware handle 401 when routed to SSE app
-        return RedirectResponse(url="/sse/messages/", status_code=307)
-
-
 def create_app() -> Starlette:
     """Create the Starlette ASGI app with status page and auth middleware."""
     asgi_middleware = []
     if TOKENS:
         asgi_middleware.append(ASGIMiddleware(AuthMiddleware))
 
-    http_app = mcp.http_app(
+    mcp_app = mcp.http_app(
         stateless_http=True,
         transport="http",
         middleware=asgi_middleware,
     )
 
-    sse_app = mcp.http_app(
-        transport="sse",
-        middleware=asgi_middleware,
-    )
 
-    # Mount the status page on / and the MCP app on everything else.
-    # Both share the same auth middleware (which exempts PUBLIC_PATHS).
     app = Starlette(
         routes=[
             Route("/", status_page),
             Route("/status", status_page),
-            Route("/sse/messages", sse_messages_redirect, methods=["POST"]),
-            Mount("/sse", app=sse_app),
-            Mount("/", app=http_app),
+            Mount("/", app=mcp_app),
         ],
         middleware=asgi_middleware,
-        lifespan=http_app.router.lifespan_context,
+        lifespan=mcp_app.lifespan,
     )
     return app
 
