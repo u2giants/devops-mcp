@@ -107,17 +107,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.url.path in PUBLIC_PATHS:
             return await call_next(request)
+
         token = None
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer "):
             token = auth[7:]
         elif request.query_params.get("token"):
             token = request.query_params.get("token")
+
+        if token is None and request.url.path.startswith("/sse") and request.method == "POST":
+            token = request.headers.get("x-mcp-token") or request.headers.get("x-token")
+
         if token is None:
             return JSONResponse({"error": "Missing auth: provide Authorization header or ?token= param"}, status_code=401)
+
         agent = TOKENS.get(token)
         if agent is None:
             return JSONResponse({"error": "Invalid token"}, status_code=403)
+
         current_agent.set(agent)
         response = await call_next(request)
         return response
@@ -629,3 +636,4 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8765"))
     host = os.environ.get("BIND_HOST", "0.0.0.0")
     uvicorn.run(app, host=host, port=port, log_level="info")
+
