@@ -30,9 +30,10 @@ from fastmcp.server.middleware import Middleware as McpMiddleware, MiddlewareCon
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response
 from starlette.routing import Mount, Route
 from starlette.applications import Starlette
+from starlette.types import ASGIApp
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -595,8 +596,71 @@ async def status_page(request: Request) -> HTMLResponse:
 
 
 # ---------------------------------------------------------------------------
-# App entrypoint
+# SSE message endpoint — handles POST /sse/messages and /sse/messages/
+# Roo MCP posts here and the SSE transport issues a 307 redirect to trailing-
+# slash URL. If auth is via ?token= query param, the redirect loses it.
+# We intercept at Starlette level, validate auth, then inject Authorization
+# header so subsequent requests (including redirects) carry it.
 # ---------------------------------------------------------------------------
+
+async def sse_messages_post(request: Request, sse_app: ASGIApp) -> Response:
+    """Authenticate and forward POST /sse/messages[*] to SSE transport."""
+    # Extract token from query param (Roo uses ?token=...)
+    token = request.query_params.get("token")
+    if not token:
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer "):
+            token = auth[7:]
+
+    # Fallback headers Roo may send
+    if not token:
+        token = request.headers.get("x-mcp-token") or request.headers.get("x-token")
+
+    if not token:
+        return JSONResponse({"error": "Missing auth: provide Authorization header or ?token= param"}, status_code=401)
+
+    agent = TOKENS.get(token)
+    if agent is None:
+        return JSONResponse({"error": "Invalid token"}, status_code=403)
+
+    current_agent.set(agent)
+
+    # Inject Authorization header so redirects preserve auth
+    headers = dict(request.headers)
+    headers["authorization"] = f"Bearer {token}"
+    # Remove query params from scope path to avoid double-auth
+    scope = {
+        **request.scope,
+        "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        "type": "http",
+    }
+
+    # Proxy request to SSE app
+    async def receive():
+        body = await request.body()
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    send_queue: list = []
+    async def send(message):
+        send_queue.append(message)
+
+    await sse_app(scope, receive, send)
+
+    # Extract response from SSE app
+    status_code = 200
+    response_headers = []
+    response_body = b""
+    for msg in send_queue:
+        if msg["type"] == "http.response.start":
+            status_code = msg["status"]
+            response_headers = [(k.decode() if isinstance(k, bytes) else k,
+                                 v.decode() if isinstance(v, bytes) else v)
+                                for k, v in msg.get("headers", [])]
+        elif msg["type"] == "http.response.body":
+            response_body += msg.get("body", b"")
+
+    return Response(content=response_body, status_code=status_code, headers=response_headers)
+
 
 def create_app() -> Starlette:
     """Create the Starlette ASGI app with status page and auth middleware."""
@@ -615,12 +679,18 @@ def create_app() -> Starlette:
         middleware=asgi_middleware,
     )
 
+    # Create handler for SSE messages endpoint
+    async def sse_messages_handler(request: Request) -> Response:
+        return await sse_messages_post(request, sse_app)
+
     # Mount the status page on / and the MCP app on everything else.
     # Both share the same auth middleware (which exempts PUBLIC_PATHS).
     app = Starlette(
         routes=[
             Route("/", status_page),
             Route("/status", status_page),
+            Route("/sse/messages", sse_messages_handler, methods=["POST"]),
+            Route("/sse/messages/", sse_messages_handler, methods=["POST"]),
             Mount("/sse", app=sse_app),
             Mount("/", app=http_app),
         ],
