@@ -598,17 +598,21 @@ def create_app() -> Starlette:
     if TOKENS:
         asgi_middleware.append(ASGIMiddleware(AuthMiddleware))
 
+    # StreamableHTTP transport — for Claude Code CLI and modern MCP clients
     mcp_app = mcp.http_app(
         stateless_http=True,
         transport="http",
         middleware=asgi_middleware,
     )
 
+    # SSE transport — for Roo Code / Cline and older MCP clients
+    sse_app = mcp.sse_app(middleware=asgi_middleware)
 
     app = Starlette(
         routes=[
             Route("/", status_page),
             Route("/status", status_page),
+            Mount("/sse", app=sse_app),
             Mount("/", app=mcp_app),
         ],
         middleware=asgi_middleware,
