@@ -606,7 +606,7 @@ def create_app() -> Starlette:
     )
 
     # SSE transport — for Roo Code / Cline and older MCP clients
-    sse_app = mcp.sse_app(middleware=asgi_middleware)
+    sse_app = mcp.http_app(transport="sse", middleware=asgi_middleware)
 
     app = Starlette(
         routes=[
