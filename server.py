@@ -103,10 +103,13 @@ def _audit(agent: str, tool: str, args: dict | None, ok: bool, duration_ms: int,
 # ---------------------------------------------------------------------------
 
 PUBLIC_PATHS = {"/", "/status"}
+# SSE message POSTs are session-authenticated by the MCP transport itself
+PUBLIC_PREFIXES = ("/sse/messages",)
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in PUBLIC_PATHS:
+        path = request.url.path
+        if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
             return await call_next(request)
 
         token = None
