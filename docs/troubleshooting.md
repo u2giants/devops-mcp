@@ -1,5 +1,51 @@
 # Troubleshooting
 
+## `MCP error -32001: Request timed out` in Windsurf / Roo Code
+
+**Symptom:** The IDE shows `Error executing MCP tool: MCP error -32001: Request timed out`
+when trying to use any tool. The server logs show a burst of 401s followed by requests
+to `/.well-known/oauth-protected-resource` and `POST /register`, all returning 401.
+
+**Root cause:** When the MCP connection drops (e.g. Cloudflare Tunnel hiccup, network
+reset, IDE restart), newer versions of Roo Code / Windsurf try to reconnect using the
+MCP 2025-03-26 OAuth discovery flow. They send the first request *without* the bearer
+token to probe for OAuth support. Without a `WWW-Authenticate` header in the 401
+response, the client interprets the error as "OAuth server present but unconfigured"
+and enters an OAuth discovery loop — all of which fails with 401. After exhausting the
+loop, it returns `-32001` to the user.
+
+**Fix applied (2026-04-11):** The auth middleware now returns
+`WWW-Authenticate: Bearer realm="devops-mcp"` on every 401 and 403. This signals
+to the client that static Bearer token auth is expected, short-circuiting the OAuth
+discovery loop and causing the client to immediately retry with its configured token.
+
+**If you see this error again:**
+
+1. Check the devops-mcp logs for the OAuth probe pattern:
+   ```bash
+   docker logs devops-mcp --since 5m 2>&1 | grep -E "401|well-known|register"
+   ```
+   If you see `GET /.well-known/oauth-protected-resource` returning 401, the
+   `WWW-Authenticate` header is missing (the container is running old code).
+
+2. Verify the header is present in the 401 response:
+   ```bash
+   curl -sI -X POST https://mcp.designflow.app/mcp \
+     -H "Content-Type: application/json" -d '{}' | grep -i www-authenticate
+   # Should print: www-authenticate: Bearer realm="devops-mcp"
+   ```
+
+3. If the header is missing, a redeploy picks up the fix:
+   ```bash
+   # trigger CI/CD via a git push, or restart the running container:
+   docker restart devops-mcp
+   ```
+
+4. As a short-term workaround (if the server isn't reachable), reload the MCP
+   connection in your IDE — Windsurf: Command Palette → "Reload MCP Servers".
+
+---
+
 ## Cloudflare 502 / 503 errors
 
 **Symptom:** Browser or AI client gets `502 Bad Gateway` or `503 Service Unavailable` from Cloudflare.

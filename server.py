@@ -120,11 +120,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
             token = request.query_params.get("token")
 
         if token is None:
-            return JSONResponse({"error": "Missing auth: provide Authorization header or ?token= param"}, status_code=401)
+            return JSONResponse(
+                {"error": "Missing auth: provide Authorization header or ?token= param"},
+                status_code=401,
+                headers={"WWW-Authenticate": 'Bearer realm="devops-mcp"'},
+            )
 
         agent = TOKENS.get(token)
         if agent is None:
-            return JSONResponse({"error": "Invalid token"}, status_code=403)
+            return JSONResponse(
+                {"error": "Invalid token"},
+                status_code=403,
+                headers={"WWW-Authenticate": 'Bearer realm="devops-mcp" error="invalid_token"'},
+            )
 
         current_agent.set(agent)
         response = await call_next(request)

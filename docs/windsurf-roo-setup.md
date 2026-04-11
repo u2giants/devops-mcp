@@ -62,6 +62,7 @@ A successful response will include `"result"` with server info. If you get:
 | 503 Service Unavailable | Tunnel or container down | Same as 502 |
 | Tools don't appear in client | Config not saved, or wrong path | Re-check `mcp_config.json` syntax |
 | "SSE" errors in logs | Client trying old SSE transport | Make sure URL ends in `/mcp`, not `/sse` |
+| `-32001: Request timed out` | Connection dropped; client OAuth discovery loop failed | See [troubleshooting.md](troubleshooting.md) — reload MCP in IDE or restart container |
 
 ## Security note
 

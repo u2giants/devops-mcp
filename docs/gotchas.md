@@ -177,3 +177,31 @@ Claude read-only access while giving Roo Code full access, for example.
 If you need per-agent permissions in the future, each agent would need to connect to
 a different MCP server configured with different tool sets, or the auth middleware
 would need to be extended to check agent-specific allowlists per tool.
+
+---
+
+## 16. `WWW-Authenticate` header must be present on every 401
+
+**Discovered 2026-04-11.** Newer MCP clients (Windsurf / Roo Code with MCP
+2025-03-26 support) implement OAuth 2.1 discovery. When they receive a 401 response
+*without* a `WWW-Authenticate` header, they treat it as an implicit OAuth server and
+enter a discovery loop:
+
+```
+GET /.well-known/oauth-protected-resource  → 401
+GET /.well-known/oauth-authorization-server → 401
+POST /register                              → 401
+```
+
+After the loop fails, the client surfaces this as `MCP error -32001: Request timed
+out` to the user. The actual cause is a reconnection handshake failure, not a
+network timeout.
+
+The auth middleware in `server.py` must always return:
+```
+WWW-Authenticate: Bearer realm="devops-mcp"
+```
+on every 401 (missing token) and a matching header on every 403 (bad token). This
+tells the client to use static Bearer token auth and skip the OAuth flow entirely.
+
+See [troubleshooting.md](troubleshooting.md) for diagnosis and recovery steps.
