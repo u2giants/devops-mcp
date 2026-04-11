@@ -205,3 +205,27 @@ on every 401 (missing token) and a matching header on every 403 (bad token). Thi
 tells the client to use static Bearer token auth and skip the OAuth flow entirely.
 
 See [troubleshooting.md](troubleshooting.md) for diagnosis and recovery steps.
+
+---
+
+## 17. Roo Code's MCP client has a ~60-second transport timeout
+
+**Discovered 2026-04-11.** Roo Code (and likely Windsurf) has an internal MCP
+transport timeout of roughly 60–75 seconds. If `run_command` is given a `timeout`
+greater than this and the command actually runs that long, the client cancels the
+request and returns `MCP error -32001: Request timed out` — even though the server
+eventually completes the command successfully (visible in the audit log with `ok:true`).
+
+The `timeout` parameter in `run_command` controls the *server-side* subprocess
+timeout only. It has no effect on the client's transport timeout.
+
+**Rule of thumb:** Keep individual `run_command` calls under ~50 seconds of wall time.
+For longer operations, use `nohup` / background execution and poll for completion:
+
+```
+run_command("nohup long_operation > /tmp/out.log 2>&1 &")
+# later:
+run_command("tail -20 /tmp/out.log")
+```
+
+See [troubleshooting.md](troubleshooting.md) for more workarounds.

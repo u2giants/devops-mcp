@@ -46,6 +46,59 @@ discovery loop and causing the client to immediately retry with its configured t
 
 ---
 
+## `MCP error -32001: Request timed out` during long-running commands
+
+**Symptom:** The IDE shows `-32001: Request timed out` while a `run_command` call is executing
+a long-running command (e.g. `sleep 90`, a slow `apt install`, a lengthy `curl`). The server
+audit log shows the command eventually completed successfully (`ok: true`), but the client
+already gave up.
+
+**Root cause:** Roo Code's MCP transport layer has an internal client-side timeout of roughly
+60–75 seconds. When `run_command` is called with `timeout > ~60`, the server dutifully waits
+for the process to finish, but Roo's client cancels the in-flight HTTP request before the
+response arrives and returns `-32001`.
+
+The server is not broken — the command ran to completion. The error is entirely on the
+client side.
+
+**Confirmed occurrence (2026-04-11):**
+```
+run_command("sleep 90 && curl ...", timeout=120)
+→ server: ok=true, duration_ms=90077
+→ Roo: -32001 at T+67s (client timed out before server responded)
+```
+
+**Workarounds:**
+
+1. **Keep commands under ~60 seconds.** For long operations, split them:
+   ```
+   # Instead of: sleep 90 && do_thing
+   # Step 1: start in background
+   run_command("nohup do_thing > /tmp/out.log 2>&1 &")
+   # Step 2: poll for completion
+   run_command("tail -f /tmp/out.log")
+   ```
+
+2. **Use `nohup` / background execution** for fire-and-forget tasks, then check output:
+   ```
+   run_command("nohup apt-get upgrade -y > /tmp/apt.log 2>&1 &")
+   # later:
+   run_command("tail -20 /tmp/apt.log")
+   ```
+
+3. **Redirect long output to a file** and read it back:
+   ```
+   run_command("docker build -t myimage . > /tmp/build.log 2>&1; echo done")
+   # then:
+   read_file("/tmp/build.log")
+   ```
+
+**Note:** This is a Roo/Windsurf client limitation. There is no server-side setting to extend
+the client's timeout. The `timeout` parameter in `run_command` controls how long the *server*
+waits for the subprocess — it does not affect the client's transport timeout.
+
+---
+
 ## Cloudflare 502 / 503 errors
 
 **Symptom:** Browser or AI client gets `502 Bad Gateway` or `503 Service Unavailable` from Cloudflare.
