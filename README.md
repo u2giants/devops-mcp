@@ -35,6 +35,7 @@ The **ContextForge** sidecar (`contextforge-register`) is a separate process in 
 | [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
 | [docs/gotchas.md](docs/gotchas.md) | Things that will bite you — read before making changes |
+| [docs/claude-desktop-setup.md](docs/claude-desktop-setup.md) | Claude desktop (Cowork) on Windows — mcp-remote + PowerShell setup script |
 
 ---
 
