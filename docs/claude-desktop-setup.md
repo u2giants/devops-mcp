@@ -23,7 +23,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned   # first t
 .\setup-claude-mcps.ps1
 ```
 
-**Step 4 — Restart Claude desktop.** Fully quit and reopen. The MCPs appear automatically.
+**Step 4 — Restart Claude desktop.** Fully quit and reopen. The MCPs will connect on startup.
 
 ---
 
@@ -52,22 +52,24 @@ if (-not $config.mcpServers) {
 }
 
 # devops-mcp: full VPS access via Streamable HTTP
+# Note: mcp-remote auto-detects Streamable HTTP - no --transport flag needed
 $config.mcpServers | Add-Member -NotePropertyName "devops-mcp" -NotePropertyValue ([PSCustomObject]@{
     command = "C:\PROGRA~1\nodejs\npx.cmd"
     args = @(
         "-y", "mcp-remote@latest",
         "https://mcp.designflow.app/mcp",
-        "--transport", "http",
         "--header", "Authorization: Bearer REPLACE_WITH_TOKEN_ROOCODE"
     )
 }) -Force
 
 # synology-monitor: NAS monitoring via SSE
+# Note: --transport sse is required - mcp-remote defaults to http-first which fails on SSE endpoints
 $config.mcpServers | Add-Member -NotePropertyName "synology-monitor" -NotePropertyValue ([PSCustomObject]@{
     command = "C:\PROGRA~1\nodejs\npx.cmd"
     args = @(
         "-y", "mcp-remote@latest",
         "https://nas-mcp.designflow.app/sse",
+        "--transport", "sse",
         "--header", "Authorization: Bearer REPLACE_WITH_NAS_BEARER_TOKEN"
     )
 }) -Force
@@ -89,11 +91,16 @@ Write-Host "Done. Restart Claude desktop to activate the MCPs."
 
 ---
 
-## Key config detail: transport flags
+## Critical: transport flags
 
-The `--transport http` flag is **required** for devops-mcp because it uses the newer Streamable HTTP protocol. The synology-monitor uses SSE (the older transport) and does not need that flag.
+`mcp-remote` defaults to trying Streamable HTTP first (`http-first` strategy). This works fine for devops-mcp, but **silently fails for synology-monitor** because that endpoint is SSE-only.
 
-Omitting `--transport http` on devops-mcp causes `mcp-remote` to default to SSE, which fails silently.
+| Server | Transport | Flag needed |
+|---|---|---|
+| devops-mcp (`/mcp`) | Streamable HTTP | None — auto-detected correctly |
+| synology-monitor (`/sse`) | SSE | `--transport sse` required |
+
+Without `--transport sse` on synology-monitor, mcp-remote will attempt an HTTP POST, receive a 503, and crash silently — Claude will show no error but the MCP won't appear.
 
 ---
 
@@ -105,6 +112,8 @@ Omitting `--transport http` on devops-mcp causes `mcp-remote` to default to SSE,
 | `npx.cmd` path wrong | Run `where npx` in PowerShell to find the real path and update the script |
 | MCP shows connected but tools fail | Token is wrong — verify against `TOKEN_ROOCODE` in Coolify env vars |
 | `Set-ExecutionPolicy` refused | Run PowerShell as Administrator |
-| Want to verify the connection | Ask Claude: *"call the health tool"* — returns server info if working |
+| synology-monitor fails with 503 | Missing `--transport sse` flag — the most common mistake |
+| Want to verify devops-mcp | Ask Claude: *"call the health tool"* — returns server info if working |
+| Want to see connection errors | Check `%APPDATA%\Claude\logs\mcp-server-<name>.log` |
 
 See [troubleshooting.md](troubleshooting.md) for infrastructure-level problems (502s, tunnel down, container not running).
