@@ -51,3 +51,45 @@ Docker container managed by Coolify. Authenticates callers via per-agent bearer 
 | VPS IP | `178.156.180.212` |
 | Container name | `devops-mcp-vj5f76xet05bxwdq4utw1kho` |
 | Audit volume | `vj5f76xet05bxwdq4utw1kho_mcp-audit` |
+
+---
+
+## Docker Container Naming on this VPS
+
+All containers on this VPS are managed by Coolify, which names them using internal UUIDs (e.g., `server-rd261bt0wy7ifjrkoe1tkl92-101538519687`). To keep things readable, a systemd service automatically renames every container to a human-friendly name the moment it starts — surviving every redeploy, restart, or server reboot.
+
+**How it works:**
+- Script: `/usr/local/bin/docker-rename-containers.sh`
+- Systemd service: `docker-rename-containers-watch` (runs permanently, watches Docker start events)
+- On any container start event, the script checks the name against its map and renames it immediately
+
+**Current name map** (UUID/Coolify name → readable name):
+
+| Coolify name (prefix match) | Readable name |
+|---|---|
+| `server-rd261bt0wy7ifjrkoe1tkl92*` | `twenty-server` |
+| `worker-rd261bt0wy7ifjrkoe1tkl92*` | `twenty-worker` |
+| `g5j115bwrn8125ev6ap1tjrv` | `twenty-postgres` |
+| `jht51gt0biykivnama17crlt` | `twenty-redis` |
+| `g5j115bwrn8125ev6ap1tjrv-proxy` | `twenty-nginx-proxy` |
+| `lrddgp8im0276gllujfu7wm3*` | `synology-monitor-web` |
+| `efl17f5iocnz94840pexre9d*` | `synology-nas-mcp` |
+| `openmanus-backend-e10kwzww46ljhrgz1qj08j6a*` | `openmanus-backend` |
+| `open-webui-e10kwzww46ljhrgz1qj08j6a*` | `openmanus-open-webui` |
+| `novnc-e10kwzww46ljhrgz1qj08j6a*` | `openmanus-novnc` |
+| `devops-mcp-vj5f76xet05bxwdq4utw1kho*` | `devops-mcp` |
+| `cloudflared-vj5f76xet05bxwdq4utw1kho*` | `devops-mcp-cloudflared` |
+| `cf-cloudflared-vj5f76xet05bxwdq4utw1kho*` | `devops-mcp-cloudflared-cf` |
+| `contextforge-vj5f76xet05bxwdq4utw1kho*` | `devops-mcp-contextforge` |
+
+**When a new container is added to this project:**
+
+1. Find its Coolify-assigned name: `docker ps --format "{{.Names}}"`
+2. Open the rename script: `sudo nano /usr/local/bin/docker-rename-containers.sh`
+3. Add an entry to the appropriate map:
+   - If the name ends in a build number suffix (e.g., `-101538519687`), use `PREFIX_RENAMES` with the stable prefix
+   - If the name is fixed (e.g., a database UUID with no suffix), use `RENAMES` with the exact name
+4. Decide on a readable name following the pattern `{project}-{function}` (e.g., `twenty-postgres`, `openmanus-backend`)
+5. The watcher picks up script changes immediately — no restart needed
+6. Run `sudo /usr/local/bin/docker-rename-containers.sh` to apply to any already-running containers
+7. Update the name map table in this file and in every other project's CLAUDE.md on this VPS
