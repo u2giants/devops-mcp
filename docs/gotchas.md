@@ -229,3 +229,32 @@ run_command("tail -20 /tmp/out.log")
 ```
 
 See [troubleshooting.md](troubleshooting.md) for more workarounds.
+
+---
+
+## 18. Server-side hangs are NOT the same as the Roo client timeout
+
+**Discovered 2026-05.** It's tempting to assume every `-32001` / "connection
+interrupted" is the client-side timeout described in #17. It's not. Four
+*server-side* blocking patterns existed and were fixed in commit `a712d08`:
+
+1. **`_run_on_host` used `subprocess.run`** — only the direct bash child got
+   SIGKILL on timeout. For `ssh`, `docker`, or any pipeline, the grandchildren
+   kept stdout pipes open and the call blocked past `timeout`. Fixed by
+   `Popen(start_new_session=True)` + `os.killpg(pgid, SIGKILL)`.
+2. **`read_file` materialized the entire file** via `read_text().splitlines()`
+   before slicing. Multi-GB logs allocated GBs and stalled the worker thread.
+   Fixed by streaming line-by-line with byte cap (default 5 MB, max 50 MB).
+3. **`list_directory(recursive=True)` sorted the full tree** before applying
+   `max_entries`. On `/host` it walked and held millions of paths. Fixed by
+   bounded `islice` + sort of the window only.
+4. **Audit-log reads loaded the whole file** on every call. Fixed by
+   tail-from-end seek (last 512 KB); `total` becomes an estimate for big logs.
+
+**How to tell which one you're hitting:** the Roo client-timeout case (#17)
+leaves a *successful* audit entry behind — `ok: true, duration_ms: 90077`.
+A server-side hang leaves no audit entry at all, because the call never
+returned. If `view_audit_log` doesn't show the failed call, suspect this.
+
+See [troubleshooting.md](troubleshooting.md) for the four-pattern breakdown
+and a `curl` check to verify the fix after deploy.

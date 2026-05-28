@@ -116,11 +116,15 @@ IN_CONTAINER = os.path.isdir("/host/etc") and os.path.isfile("/.dockerenv")
 NSENTER = ["nsenter", "--target", "1", "--mount", "--uts", "--ipc", "--net", "--pid", "--"]
 
 def _run_on_host(command, cwd="/", timeout=DEFAULT_TIMEOUT, ...):
-    if IN_CONTAINER:
-        cmd = NSENTER + ["bash", "-c", command]
-    else:
-        cmd = ["bash", "-c", command]
-    ...
+    cmd = (NSENTER if IN_CONTAINER else []) + ["bash", "-c", command]
+    proc = subprocess.Popen(cmd, stdout=PIPE, stderr=PIPE, text=True,
+                            start_new_session=True, ...)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)   # kill the WHOLE pgroup
+        stdout, stderr = proc.communicate(timeout=5)
+        ...
 ```
 
 `IN_CONTAINER` is checked once at startup and cached. The detection logic:
@@ -129,6 +133,23 @@ def _run_on_host(command, cwd="/", timeout=DEFAULT_TIMEOUT, ...):
 
 Both must be true to activate nsenter mode. This means the server also works
 directly on the host for development/testing (just run `HOST_ROOT=/ python server.py`).
+
+### Process-group kill (do not simplify back to `subprocess.run`)
+
+`subprocess.run(..., timeout=N)` only sends SIGKILL to the *direct* bash child.
+For commands that fork — `ssh`, `docker`, any pipeline like `cmd1 | cmd2 | cmd3` —
+bash exits but its grandchildren stay alive holding the stdout pipes open, so
+`communicate()` blocks past the nominal timeout waiting for those pipes. MCP
+clients then see this as a server hang, often surfacing as `-32001`.
+
+The fix is `Popen(start_new_session=True)` (puts the child in its own process
+group) plus `os.killpg(os.getpgid(proc.pid), SIGKILL)` on `TimeoutExpired`. The
+whole group dies at once. Verified: `bash -c 'sleep 30 | sleep 30 | cat'` with
+`timeout=2` returns at exactly 2.00s, not 30s.
+
+This is the same root cause and fix as the synology-monitor 4-day runaway
+`grep -R` incident — see [troubleshooting.md](troubleshooting.md) for the
+production confirmation steps.
 
 ### Why nsenter and not just running commands in the container
 
@@ -176,10 +197,25 @@ The most powerful tool. Runs any bash command on the host via nsenter. No restri
 Output is capped at `MAX_OUTPUT_CHARS` (60,000 by default). Long-running commands
 (> `timeout` seconds, default 120) are killed and return an error.
 
-### `read_file(path, offset, limit)`
+### `read_file(path, offset, limit, max_bytes)`
 Returns line-numbered content. `offset` and `limit` are line numbers (not bytes).
-Max `limit` is 10,000 lines per call. For large files, call repeatedly with increasing
-offsets.
+Max `limit` is 10,000 lines per call.
+
+Streams line-by-line — never loads the whole file. Stops as soon as the window
+is filled OR `max_bytes` has been scanned (default 5 MB, hard cap 50 MB). For
+files larger than `max_bytes` the response includes `truncated_by_bytes: true`
+and `total_lines` is omitted. To read late content in a huge log, either:
+
+- raise `max_bytes` (up to 50 MB), or
+- shell out: `run_command("tail -n 1000 /path/to/log")` and parse the output.
+
+Response fields: `size_bytes`, `scanned_lines`, `lines_returned`, `truncated`,
+`truncated_by_bytes` (only when set), `total_lines` (only when EOF reached and
+not byte-capped), `content`.
+
+The previous implementation called `read_text().splitlines()` and allocated the
+entire file before slicing — multi-GB logs would stall the worker thread for
+seconds and risk OOM-killing the container.
 
 ### `write_file(path, content, make_backup)`
 Writes the entire file content. Not a diff/patch — the full content must be provided.
@@ -187,7 +223,13 @@ Creates parent directories if needed. `make_backup=True` (default) saves the old
 
 ### `list_directory(path, recursive, max_entries)`
 `recursive=True` can produce enormous output on `/` or `/home`. Always use with
-`max_entries` and a specific path. Default `max_entries` is 200.
+`max_entries` and a specific path. Default `max_entries` is 200, hard cap 1000.
+
+Streams from `rglob`/`iterdir` via `itertools.islice` and stops at `max_entries + 1`
+entries (the +1 sets `truncated` correctly). The bounded window is then sorted —
+NOT the full tree. The previous implementation called `sorted(p.rglob("*"))`,
+which materialized every entry under the path before applying `max_entries`; on
+`/host` that walked and held millions of paths in memory.
 
 ### `docker_ps(all_containers)`
 Runs `docker ps` on the host. Returns formatted table output.
@@ -209,13 +251,21 @@ Allowed actions: `start`, `stop`, `restart`, `enable`, `disable`, `reload`.
 Returns the last N audit log entries (default 50, max 500) as structured JSON.
 AIs can use this to see what has been done recently before making changes.
 
+Uses `_tail_audit_lines()` which seeks to the **last 512 KB** of the audit
+file rather than reading the whole thing. For audit logs larger than 512 KB
+the `total` field is an estimate from the bytes-per-line average and the
+response is marked `total_is_estimate: true`. This keeps both `view_audit_log`
+and the status page O(1) as the log grows — the previous implementation
+called `Path(AUDIT_LOG_PATH).read_text()` on every invocation.
+
 ---
 
 ## The status page
 
 A Starlette `Route("/", status_page)` is added to the app before the FastMCP mount.
-It reads `_registered_tools` and the last 30 audit log entries, renders them as HTML,
-and returns without auth.
+It reads `_registered_tools` and the last 30 audit log entries (via
+`_tail_audit_lines`, which seeks to the last 512 KB of the file — not a full
+read), renders them as HTML, and returns without auth.
 
 The page auto-refreshes via `<meta http-equiv="refresh" content="30">`. No JavaScript.
 

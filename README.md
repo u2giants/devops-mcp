@@ -52,10 +52,10 @@ exactly as if it had SSH root access, but with an audit log of every action.
 
 | Tool | What it does |
 |---|---|
-| `run_command` | Run any shell command on the host (docker, systemctl, apt, etc.) |
-| `read_file` | Read any file from the host filesystem |
+| `run_command` | Run any shell command on the host (docker, systemctl, apt, etc.). Process group is SIGKILLed on timeout so `ssh` / pipelines can't orphan children. |
+| `read_file` | Read any file from the host filesystem. Streams with `offset` / `limit` / `max_bytes` (default 5 MB, cap 50 MB) so multi-GB logs don't block the worker. |
 | `write_file` | Write/edit any file (auto-backup of originals) |
-| `list_directory` | Browse the filesystem |
+| `list_directory` | Browse the filesystem. `recursive=True` bounded at `max_entries` (default 200, cap 1000) without walking the full tree. |
 | `docker_ps` | List containers |
 | `docker_logs` | Get container logs |
 | `docker_action` | Restart / stop / start a container |
