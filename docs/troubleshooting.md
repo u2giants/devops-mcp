@@ -99,6 +99,74 @@ waits for the subprocess — it does not affect the client's transport timeout.
 
 ---
 
+## Server-side hangs — `read_file` on large files, `ssh` / pipeline commands
+
+**Symptom:** Tool call hangs well past its nominal `timeout`, eventually returning `-32001`
+or "connection interrupted." Distinct from the Roo client-timeout case above: here the
+server itself is genuinely stuck, not just the client giving up.
+
+**Three independent root causes were fixed in `server.py` (commit 2026-05-28):**
+
+### 1. `_run_on_host` killed bash but not its grandchildren
+
+`subprocess.run(..., timeout=N)` sends SIGKILL only to the direct bash child. For commands
+that fork — `ssh`, `docker`, any pipeline like `cmd1 | cmd2 | cmd3` — bash exits but its
+grandchildren stay alive holding stdout pipes open. `subprocess.run` then blocks on
+`communicate()` waiting for those pipes to close, which never happens. The MCP server
+appears hung; the audit log shows nothing because the call never returned.
+
+Fixed by switching to `Popen(start_new_session=True)` + `os.killpg(pgid, SIGKILL)` on
+timeout. The whole process group dies at once. Verified with `bash -c 'sleep 30 | sleep 30 | cat'`,
+`timeout=2`: returns at exactly 2.00s instead of hanging 30s.
+
+Same root cause and fix as the synology-monitor 4-day-runaway `grep -R` incident.
+
+### 2. `read_file` materialized the entire file before slicing
+
+`p.read_text(...).splitlines()[offset:offset+limit]` loads every byte of the file into
+memory and then throws most of it away. On a multi-GB log this allocates GBs, blocks the
+worker thread for many seconds, and risks OOM-killing the container. Clients see a hang.
+
+Fixed by streaming line-by-line and breaking out as soon as the window is filled OR
+`max_bytes` (default 5MB, hard cap 50MB) is scanned. For files larger than `max_bytes`,
+the response includes `truncated_by_bytes: true` and `total_lines` is omitted — use a
+higher `offset`, raise `max_bytes`, or shell out via `run_command("tail -n 1000 …")`.
+
+### 3. `list_directory(recursive=True)` sorted the full tree before truncating
+
+`sorted(p.rglob("*"), …)` materialized every entry under the path into memory before
+applying `max_entries=200`. On `/host` that walked and held millions of paths.
+
+Fixed by streaming `rglob` through `itertools.islice` to bound at `max_entries + 1`
+entries, then sorting only the bounded window. Truncation is reported honestly via
+the `truncated` boolean.
+
+### Bonus: audit log reads no longer load the full log
+
+`view_audit_log` and the status page used to call `Path(AUDIT_LOG_PATH).read_text(...)`
+on every invocation. As the audit log grows this got slower without bound and could
+block the worker thread on a busy server.
+
+Fixed by `_tail_audit_lines()` which seeks to the last 512KB of the file. For audit
+logs larger than that, the `total` field becomes an estimate from the bytes-per-line
+average and the response is marked `total_is_estimate: true`.
+
+### How to confirm in production
+
+After the next deploy, run:
+
+```bash
+# Should return in ~2s, not ~30s:
+curl -s -H "Authorization: Bearer $TOKEN" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"sleep 30 | sleep 30 | cat","timeout":2}}}' \
+  https://mcp.designflow.app/mcp
+
+# read_file on a multi-MB log file should now return quickly without OOM:
+docker logs devops-mcp --since 5m 2>&1 | grep -E "MemoryError|Killed|read_file"
+```
+
+---
+
 ## Cloudflare 502 / 503 errors
 
 **Symptom:** Browser or AI client gets `502 Bad Gateway` or `503 Service Unavailable` from Cloudflare.

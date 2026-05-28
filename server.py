@@ -18,9 +18,11 @@ import json
 import logging
 import os
 import shlex
+import signal
 import subprocess
 import time
 from datetime import datetime, timezone
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -199,38 +201,79 @@ def _run_on_host(
     timeout: int = DEFAULT_TIMEOUT,
     max_output: int = MAX_OUTPUT,
 ) -> dict[str, Any]:
-    """Run a shell command on the host via nsenter (container) or directly (host)."""
+    """Run a shell command on the host via nsenter (container) or directly (host).
+
+    Uses Popen + start_new_session so the child runs in its own process group.
+    On timeout we SIGKILL the entire process group, not just the direct bash
+    child. This is required for commands that fork — ssh, docker, pipelines —
+    where bash exits while its grandchildren keep stdout pipes open. Without
+    the process-group kill, subprocess.run can block well past `timeout`
+    waiting for orphaned pipes to close, which surfaces in MCP clients as a
+    "hang" on long-running ssh / read_file / docker calls.
+    """
     timeout = max(1, min(timeout, 600))
 
     if IN_CONTAINER:
         cmd = NSENTER + ["bash", "-c", command]
         run_cwd = "/"
+        env = {**os.environ, "NSENTER_CWD": cwd}
     else:
         cmd = ["bash", "-c", command]
         run_cwd = cwd
+        env = None
 
     start = time.time()
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=run_cwd,
             text=True,
-            capture_output=True,
-            timeout=timeout,
-            env={**os.environ, "NSENTER_CWD": cwd} if IN_CONTAINER else None,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
+            start_new_session=True,
         )
-    except subprocess.TimeoutExpired as exc:
+    except Exception as exc:
+        return {"ok": False, "error": f"Failed to start process: {exc}"}
+
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        # SIGKILL the whole process group. os.getpgid uses the child's PID;
+        # killpg with the negative PGID delivers the signal to every process
+        # in that group, including grandchildren (ssh-agent, docker proxy,
+        # pipeline stages) that bash spawned.
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        # Best-effort drain of whatever the killed process flushed.
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            stdout, stderr = "", ""
+
+    stdout = stdout or ""
+    stderr = stderr or ""
+    duration = round(time.time() - start, 3)
+
+    if timed_out:
         return {
             "ok": False,
-            "error": f"Timed out after {timeout}s",
-            "stdout": (exc.stdout or "")[-4000:],
-            "stderr": (exc.stderr or "")[-4000:],
+            "error": f"Timed out after {timeout}s (process group killed via SIGKILL)",
+            "stdout": stdout[-4000:],
+            "stderr": stderr[-4000:],
+            "duration_seconds": duration,
+            "timed_out": True,
         }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
 
-    stdout = proc.stdout or ""
-    stderr = proc.stderr or ""
     stdout_truncated = len(stdout) > max_output
     stderr_truncated = len(stderr) > max_output
 
@@ -241,7 +284,7 @@ def _run_on_host(
         "stderr": stderr[:max_output],
         "stdout_truncated": stdout_truncated,
         "stderr_truncated": stderr_truncated,
-        "duration_seconds": round(time.time() - start, 3),
+        "duration_seconds": duration,
     }
 
 
@@ -279,12 +322,28 @@ def run_command(
 
 
 @_tool
-def read_file(path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
+def read_file(
+    path: str,
+    offset: int = 0,
+    limit: int = 2000,
+    max_bytes: int = 5_000_000,
+) -> dict[str, Any]:
     """
     Read a text file from the host filesystem.
     Returns line-numbered content. Use offset/limit for large files.
+
+    Streams line-by-line and stops once the window is filled OR max_bytes is
+    scanned. Does NOT load the whole file into memory (this used to hang on
+    multi-GB logs). For files larger than max_bytes the response includes
+    `truncated_by_bytes: true` and `total_lines` is omitted; use a higher
+    `offset` or shell out via `run_command` with `tail`/`sed` for late content.
+
+    Defaults: limit=2000 lines, max_bytes=5MB. Hard caps: limit≤10000,
+    max_bytes≤50MB.
     """
     limit = max(1, min(limit, 10000))
+    max_bytes = max(1, min(max_bytes, 50_000_000))
+    offset = max(0, offset)
     try:
         real = _host_path(path)
         p = Path(real)
@@ -292,19 +351,46 @@ def read_file(path: str, offset: int = 0, limit: int = 2000) -> dict[str, Any]:
             return {"ok": False, "error": f"File not found: {path}"}
         if not p.is_file():
             return {"ok": False, "error": f"Not a file: {path}"}
-        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-        total = len(lines)
-        selected = lines[offset:offset + limit]
+
+        size = p.stat().st_size
+        selected: list[str] = []
+        scanned_lines = 0
+        scanned_bytes = 0
+        more_after_window = False
+        truncated_by_bytes = False
+        end = offset + limit
+
+        with p.open("r", encoding="utf-8", errors="replace") as fh:
+            for i, line in enumerate(fh):
+                scanned_lines = i + 1
+                scanned_bytes += len(line.encode("utf-8", errors="replace"))
+                if i >= end:
+                    more_after_window = True
+                    break
+                if i >= offset:
+                    selected.append(line.rstrip("\n"))
+                if scanned_bytes >= max_bytes:
+                    truncated_by_bytes = True
+                    break
+
         numbered = [f"{i + offset + 1}\t{line}" for i, line in enumerate(selected)]
-        return {
+        result: dict[str, Any] = {
             "ok": True,
             "path": path,
-            "total_lines": total,
+            "size_bytes": size,
             "offset": offset,
             "lines_returned": len(selected),
-            "truncated": (offset + limit) < total,
+            "scanned_lines": scanned_lines,
+            "truncated": more_after_window or truncated_by_bytes,
             "content": "\n".join(numbered),
         }
+        if truncated_by_bytes:
+            result["truncated_by_bytes"] = True
+            result["max_bytes"] = max_bytes
+        else:
+            # We hit EOF or the end-of-window cleanly; scanned_lines is exact.
+            result["total_lines"] = scanned_lines if not more_after_window else None
+        return result
     except Exception as exc:
         return {"ok": False, "error": str(exc), "path": path}
 
@@ -345,6 +431,12 @@ def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 
     """
     List files and directories on the host filesystem.
     Use recursive=true carefully — can produce very large output.
+
+    Streams from rglob/iterdir and stops at max_entries WITHOUT materializing
+    the full tree. The previous version called sorted() over the entire
+    iterator before applying max_entries, so a recursive list of /host walked
+    and held millions of paths in memory before truncating — a server-side
+    hang root cause on large directories.
     """
     max_entries = max(1, min(max_entries, 1000))
     try:
@@ -355,17 +447,25 @@ def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 
         if not p.is_dir():
             return {"ok": False, "error": f"Not a directory: {path}"}
 
-        iterator = p.rglob("*") if recursive else p.iterdir()
-        items = []
-        for entry in sorted(iterator, key=lambda e: str(e).lower()):
-            # Convert back to logical host path
+        # Take only the first max_entries + 1 entries — the +1 lets us report
+        # whether there were more without walking the rest of the tree.
+        raw_iter = p.rglob("*") if recursive else p.iterdir()
+        try:
+            window = list(islice(raw_iter, max_entries + 1))
+        except OSError as exc:
+            return {"ok": False, "error": f"Iteration failed: {exc}", "path": path}
+
+        truncated = len(window) > max_entries
+        window = window[:max_entries]
+
+        items: list[dict[str, Any]] = []
+        for entry in window:
             try:
                 rel = entry.relative_to(real)
                 logical = f"{path.rstrip('/')}/{rel}"
             except ValueError:
                 logical = str(entry)
-
-            item = {
+            item: dict[str, Any] = {
                 "path": logical,
                 "type": "dir" if entry.is_dir() else "file",
             }
@@ -375,14 +475,15 @@ def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 
                 except OSError:
                     pass
             items.append(item)
-            if len(items) >= max_entries:
-                break
+
+        # Sort only the bounded window — O(max_entries log max_entries), cheap.
+        items.sort(key=lambda x: x["path"].lower())
 
         return {
             "ok": True,
             "path": path,
             "count": len(items),
-            "truncated": len(items) >= max_entries,
+            "truncated": truncated,
             "items": items,
         }
     except Exception as exc:
@@ -445,23 +546,72 @@ def service_action(service: str, action: str = "restart") -> dict[str, Any]:
     return _run_on_host(f"systemctl {action} {safe}", timeout=60)
 
 
+def _tail_audit_lines(n: int) -> tuple[list[str], int, bool]:
+    """Read the last `n` lines of the audit log without loading the whole file.
+
+    Returns (lines, total_estimate, exact_total). On small files we read everything
+    and `exact_total` is True. On large files we seek to the last ~512KB and
+    estimate total from bytes/line average.
+    """
+    p = Path(AUDIT_LOG_PATH)
+    if not p.exists():
+        return [], 0, True
+
+    size = p.stat().st_size
+    # 512KB is plenty for the last 500 audit entries (~1KB/line typical).
+    tail_window = min(size, 512 * 1024)
+    with p.open("rb") as fh:
+        if tail_window < size:
+            fh.seek(size - tail_window)
+        data = fh.read(tail_window)
+
+    # If we didn't start at the file head, drop the partial first line.
+    exact_total = tail_window == size
+    if not exact_total and b"\n" in data:
+        data = data.split(b"\n", 1)[1]
+
+    text = data.decode("utf-8", errors="replace")
+    window_lines = text.strip().splitlines()
+
+    if exact_total:
+        total = len(window_lines)
+    elif window_lines:
+        avg_bytes = tail_window / max(1, len(window_lines))
+        total = max(len(window_lines), int(size / max(1.0, avg_bytes)))
+    else:
+        total = 0
+
+    return window_lines[-n:], total, exact_total
+
+
 @_tool
 def view_audit_log(lines: int = 50) -> dict[str, Any]:
-    """View recent entries from the MCP audit log. Shows who did what and when."""
+    """View recent entries from the MCP audit log. Shows who did what and when.
+
+    Reads only the tail of the log file, not the whole thing. For audit logs
+    larger than ~512KB the `total` field is an estimate, marked
+    `total_is_estimate: true`.
+    """
     lines = max(1, min(lines, 500))
     try:
-        p = Path(AUDIT_LOG_PATH)
-        if not p.exists():
-            return {"ok": True, "entries": [], "message": "No audit log yet"}
-        all_lines = p.read_text(encoding="utf-8").strip().splitlines()
-        recent = all_lines[-lines:]
+        recent, total, exact = _tail_audit_lines(lines)
+        if not recent:
+            return {"ok": True, "entries": [], "count": 0, "total": total, "message": "No audit log yet" if total == 0 else "Empty tail window"}
         entries = []
         for line in recent:
             try:
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
                 entries.append({"raw": line})
-        return {"ok": True, "count": len(entries), "total": len(all_lines), "entries": entries}
+        result: dict[str, Any] = {
+            "ok": True,
+            "count": len(entries),
+            "total": total,
+            "entries": entries,
+        }
+        if not exact:
+            result["total_is_estimate"] = True
+        return result
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
@@ -471,13 +621,11 @@ def view_audit_log(lines: int = 50) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _read_recent_audit(n: int = 30) -> list[dict]:
+    """Status-page helper. Tail-from-end so refreshes don't get slower as the log grows."""
     try:
-        p = Path(AUDIT_LOG_PATH)
-        if not p.exists():
-            return []
-        lines = p.read_text(encoding="utf-8").strip().splitlines()
-        entries = []
-        for line in reversed(lines[-n:]):
+        recent, _, _ = _tail_audit_lines(n)
+        entries: list[dict] = []
+        for line in reversed(recent):
             try:
                 entries.append(json.loads(line))
             except json.JSONDecodeError:
