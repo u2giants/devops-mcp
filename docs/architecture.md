@@ -185,8 +185,8 @@ See [cicd.md](cicd.md) for full details.
 
 - **Not a firewall or security layer.** Any agent with a valid token can do anything.
   The auth is about identity/logging, not access control.
-- **Not managed by Coolify's UI.** The container is started with `docker run` manually.
-  Coolify can see it (it has Coolify labels) but does not control its lifecycle.
-  See [deployment.md](deployment.md) for why and what this means operationally.
+- **Not a place for live source edits.** Coolify manages the running compose
+  service, but GitHub remains the source of truth. Source changes go through
+  GitHub Actions, GHCR, and the Coolify API deploy trigger.
 - **Not stateless.** The audit log volume persists data. The `/host` mount means file
   writes made through this server are permanent on the host.

@@ -27,8 +27,8 @@ GitHub Actions and pushed to GHCR — Coolify pulls it, it does not build.
 
 1. Generate a token: `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`
 2. Coolify UI → DevOps MCP → Environment Variables → Add `TOKEN_<NAME>=<value>` → Save
-3. Coolify restarts the container automatically with the new token active
-4. Update [docs/tokens.md](tokens.md) and commit to `main`
+3. Restart/redeploy the service so the process reads the new token
+4. Update [docs/tokens.md](tokens.md) only if adding a new agent name
 
 Tokens are **not** stored in GitHub Secrets or any committed file.
 
@@ -77,9 +77,15 @@ Find the commit SHA you want from the GHCR image list or `git log`, then:
 
 1. Edit `docker-compose.yml`: change `image:` to `ghcr.io/u2giants/devops-mcp:sha-<that_sha>`
 2. Commit to `main` and push
-3. CI runs, Coolify pulls the pinned image, deploys it
+3. CI runs and calls the Coolify API; Coolify pulls the pinned image and deploys it
 
 Revert to latest: change `image:` back to `ghcr.io/u2giants/devops-mcp:main`.
+
+## SSH access
+
+SSH is not the normal deployment path. Do not edit source files or run manual
+Docker builds on the VPS. Use Coolify logs/terminal only for exceptional runtime
+diagnosis, and reflect any durable configuration change back into this repo.
 
 ---
 

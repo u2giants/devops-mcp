@@ -35,12 +35,11 @@ Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 
-## 4. Coolify's restart API doesn't create new containers — only restarts existing ones
+## 4. Coolify deploy API is the normal redeploy path
 
-If you add a new service to `docker-compose.yml` (e.g. a sidecar), Coolify's
-`/restart` endpoint will not create it. You need to trigger a full redeploy via
-the Coolify UI (Redeploy button) or run `docker compose up -d` manually in
-`/data/coolify/services/vj5f76xet05bxwdq4utw1kho/`.
+The GitHub workflow calls Coolify's deploy API after pushing the GHCR image. Use
+that path for normal releases. If `docker-compose.yml` adds or removes services,
+verify the Coolify deployment recreated the stack from the updated compose file.
 
 ---
 
@@ -152,19 +151,17 @@ The UUID `vj5f76xet05bxwdq4utw1kho` appears in:
 - Coolify API calls
 
 If Coolify's service entry is deleted and recreated, it gets a new UUID. Everything
-referencing the old UUID — the container name, the volume mount in `docker run`,
-the Traefik labels — must be updated. The audit log volume with the old UUID name
-will no longer be mounted (though it still exists on disk and can be re-mounted
-manually).
+referencing the old UUID — GitHub secret `COOLIFY_SERVICE_UUID`, container names,
+and audit volume names — must be updated. Preserve or copy the audit log volume
+manually if the old UUID changes.
 
 ---
 
-## 14. GitHub Actions Node.js deprecation (deadline: June 2026)
+## 14. GitHub Actions runtime warnings
 
-The workflow uses `docker/build-push-action@v6`, `docker/login-action@v3`, and
-`docker/setup-buildx-action@v3` which run on Node.js 20. GitHub will force Node.js 24
-starting June 2, 2026. Update these to their latest versions before then to avoid
-build failures.
+If GitHub warns that a marketplace action is running on a deprecated Node.js
+runtime, bump the affected action versions and rerun the workflow. Keep the deploy
+flow itself unchanged.
 
 ---
 

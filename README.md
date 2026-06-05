@@ -30,7 +30,10 @@ The **ContextForge** sidecar (`contextforge-register`) is a separate process in 
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | How all the pieces fit together, nsenter, middleware, Cloudflare Tunnel |
 | [docs/server.md](docs/server.md) | Every section of server.py explained |
-| [docs/deployment.md](docs/deployment.md) | The `docker run` command, adding tokens, networking, volumes |
+| [AGENTS.md](AGENTS.md) | Canonical operating guide for engineers and AI sessions |
+| [docs/development.md](docs/development.md) | Local setup, checks, and MCP development rules |
+| [docs/configuration.md](docs/configuration.md) | Environment variables and GitHub Actions secrets |
+| [docs/deployment.md](docs/deployment.md) | Coolify deploy path, adding tokens, networking, volumes |
 | [docs/cicd.md](docs/cicd.md) | GitHub Actions pipeline, image tags, known limitations |
 | [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
@@ -159,4 +162,5 @@ The server detects it is inside a container via `/.dockerenv` and switches to ho
 mode automatically.
 
 Public traffic reaches the container through **Cloudflare Tunnel** (not Traefik).
-See [docs/architecture.md](docs/architecture.md) for the full diagram.
+See [docs/architecture.md](docs/architecture.md) for the full diagram. For future
+development work, start with [AGENTS.md](AGENTS.md).

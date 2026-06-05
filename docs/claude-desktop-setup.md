@@ -62,14 +62,13 @@ $config.mcpServers | Add-Member -NotePropertyName "devops-mcp" -NotePropertyValu
     )
 }) -Force
 
-# synology-monitor: NAS monitoring via SSE
-# Note: --transport sse is required - mcp-remote defaults to http-first which fails on SSE endpoints
+# synology-monitor: NAS monitoring via Streamable HTTP
 $config.mcpServers | Add-Member -NotePropertyName "synology-monitor" -NotePropertyValue ([PSCustomObject]@{
     command = "C:\PROGRA~1\nodejs\npx.cmd"
     args = @(
         "-y", "mcp-remote@latest",
-        "https://nas-mcp.designflow.app/sse",
-        "--transport", "sse",
+        "https://nas-mcp.designflow.app/mcp",
+        "--transport", "http",
         "--header", "Authorization: Bearer REPLACE_WITH_NAS_BEARER_TOKEN"
     )
 }) -Force
@@ -93,14 +92,14 @@ Write-Host "Done. Restart Claude desktop to activate the MCPs."
 
 ## Critical: transport flags
 
-`mcp-remote` defaults to trying Streamable HTTP first (`http-first` strategy). This works fine for devops-mcp, but **silently fails for synology-monitor** because that endpoint is SSE-only.
+`mcp-remote` should use Streamable HTTP for both hosted MCP servers.
 
 | Server | Transport | Flag needed |
 |---|---|---|
 | devops-mcp (`/mcp`) | Streamable HTTP | None — auto-detected correctly |
-| synology-monitor (`/sse`) | SSE | `--transport sse` required |
+| synology-monitor (`/mcp`) | Streamable HTTP | `--transport http` |
 
-Without `--transport sse` on synology-monitor, mcp-remote will attempt an HTTP POST, receive a 503, and crash silently — Claude will show no error but the MCP won't appear.
+If a client still points at Synology's old `/sse` URL, update it to `/mcp`.
 
 ---
 
@@ -112,7 +111,7 @@ Without `--transport sse` on synology-monitor, mcp-remote will attempt an HTTP P
 | `npx.cmd` path wrong | Run `where npx` in PowerShell to find the real path and update the script |
 | MCP shows connected but tools fail | Token is wrong — verify against `TOKEN_ROOCODE` in Coolify env vars |
 | `Set-ExecutionPolicy` refused | Run PowerShell as Administrator |
-| synology-monitor fails with 503 | Missing `--transport sse` flag — the most common mistake |
+| synology-monitor fails with 503 | Client may still be using an old `/sse` URL; use `/mcp` |
 | Want to verify devops-mcp | Ask Claude: *"call the health tool"* — returns server info if working |
 | Want to see connection errors | Check `%APPDATA%\Claude\logs\mcp-server-<name>.log` |
 

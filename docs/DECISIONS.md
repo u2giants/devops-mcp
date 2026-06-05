@@ -64,6 +64,5 @@ Windsurf's MCP client supports SSE transport via `serverUrl` but cannot send cus
 
 ### References
 
-- [Implementation Plan](implementation_plan.md)
 - [FastMCP SSE docs](https://gofastmcp.com)
 - [Windsurf MCP config](https://docs.windsurf.com/windsurf/mcp)
