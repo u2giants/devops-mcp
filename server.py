@@ -166,7 +166,23 @@ class AuditMiddleware(McpMiddleware):
 # FastMCP server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("devops-mcp", middleware=[AuditMiddleware()])
+MCP_INSTRUCTIONS = """
+This DevOps MCP intentionally exposes only three always-on MCP tools:
+health, tool_search, and invoke_tool.
+
+For every host, Docker, systemd, file, or audit-log task, call tool_search first
+to find the right hidden operation. Then call invoke_tool with the exact operation
+name and an args object matching the operation description. Do not assume direct
+tools such as run_command, docker_ps, read_file, or service_status are listed in
+tools/list; they are discoverable operations to keep client context small.
+
+Call health first when you need server context, visible tools, registered agents,
+or the complete operation-name list. Treat write-capable operations with care:
+this server has root-level host access, so prefer inspection commands before
+state-changing commands.
+""".strip()
+
+mcp = FastMCP("devops-mcp", instructions=MCP_INSTRUCTIONS, middleware=[AuditMiddleware()])
 _registered_tools: list[str] = []
 _operation_tools: dict[str, dict[str, Any]] = {}
 
@@ -323,8 +339,9 @@ def health() -> dict[str, Any]:
 @_tool
 def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
     """
-    Search the hidden DevOps operation registry.
-    Call this first to find the right operation, then call invoke_tool.
+    Search the hidden DevOps operation registry by keyword.
+    Call this first for every host, Docker, file, service, or audit task. Then
+    call invoke_tool with the exact returned operation name and an args object.
     """
     limit = max(1, min(limit, 30))
     terms = [term.lower() for term in query.split() if term.strip()]
@@ -334,7 +351,11 @@ def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
         description = str(spec["description"])
         haystack = f"{name} {description}".lower()
         if not terms or all(term in haystack for term in terms):
-            matches.append({"name": name, "description": description})
+            matches.append({
+                "name": name,
+                "description": description,
+                "invoke": f'invoke_tool(name="{name}", args={{...}})',
+            })
 
     return {
         "ok": True,
@@ -348,8 +369,9 @@ def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
 @_tool
 def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
     """
-    Execute an operation discovered with tool_search.
-    Pass the operation's exact name and its arguments as a JSON object.
+    Execute a hidden DevOps operation discovered with tool_search.
+    Pass the exact operation name and its arguments as a JSON object. If you do
+    not know the exact name or arguments, call tool_search first.
     """
     spec = _operation_tools.get(name)
     if spec is None:

@@ -62,6 +62,10 @@ Operational tools are intentionally hidden from the always-on MCP schema list to
 reduce client context/tool overhead. Search for the operation you need, then call
 `invoke_tool` with its exact name and arguments.
 
+The server also sends FastMCP session-level instructions telling clients to use
+this `tool_search` -> `invoke_tool` flow before host, Docker, systemd, file, or
+audit-log tasks.
+
 ## Discoverable operations
 
 | Tool | What it does |

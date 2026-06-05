@@ -60,6 +60,11 @@ Always-on MCP tools use `@_tool` instead of `@mcp.tool`. This is identical to
 the status page uses to list visible tools without calling async code at request
 time.
 
+The `FastMCP(..., instructions=MCP_INSTRUCTIONS, ...)` constructor gives clients
+session-level guidance: use `tool_search` first for DevOps operations, then call
+`invoke_tool` with the exact returned operation name. Clients may incorporate this
+hint into their system prompt during initialization.
+
 Host operations use `@_operation(...)`. They are callable through `invoke_tool`,
 but are not directly exposed in the MCP tool schema list. This keeps MCP clients
 from loading every powerful DevOps operation into every chat. The intended flow is:
