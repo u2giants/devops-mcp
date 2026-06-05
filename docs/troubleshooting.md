@@ -158,7 +158,7 @@ After the next deploy, run:
 ```bash
 # Should return in ~2s, not ~30s:
 curl -s -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"sleep 30 | sleep 30 | cat","timeout":2}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"invoke_tool","arguments":{"name":"run_command","args":{"command":"sleep 30 | sleep 30 | cat","timeout":2}}}}' \
   https://mcp.designflow.app/mcp
 
 # read_file on a multi-MB log file should now return quickly without OOM:

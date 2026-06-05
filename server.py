@@ -168,6 +168,7 @@ class AuditMiddleware(McpMiddleware):
 
 mcp = FastMCP("devops-mcp", middleware=[AuditMiddleware()])
 _registered_tools: list[str] = []
+_operation_tools: dict[str, dict[str, Any]] = {}
 
 
 def _tool(fn):
@@ -175,6 +176,18 @@ def _tool(fn):
     wrapped = mcp.tool(fn)
     _registered_tools.append(fn.__name__)
     return wrapped
+
+
+def _operation(description: str):
+    """Decorator: keep an operation callable through invoke_tool without exposing it directly."""
+    def decorator(fn):
+        _operation_tools[fn.__name__] = {
+            "fn": fn,
+            "description": description,
+        }
+        return fn
+
+    return decorator
 
 # ---------------------------------------------------------------------------
 # Host command execution helpers
@@ -302,10 +315,63 @@ def health() -> dict[str, Any]:
         "registered_agents": list(TOKENS.values()),
         "host_root": HOST_ROOT if IN_CONTAINER else "/",
         "audit_log": AUDIT_LOG_PATH,
+        "always_on_tools": sorted(_registered_tools),
+        "available_operations": sorted(_operation_tools.keys()),
     }
 
 
 @_tool
+def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
+    """
+    Search the hidden DevOps operation registry.
+    Call this first to find the right operation, then call invoke_tool.
+    """
+    limit = max(1, min(limit, 30))
+    terms = [term.lower() for term in query.split() if term.strip()]
+    matches: list[dict[str, Any]] = []
+
+    for name, spec in sorted(_operation_tools.items()):
+        description = str(spec["description"])
+        haystack = f"{name} {description}".lower()
+        if not terms or all(term in haystack for term in terms):
+            matches.append({"name": name, "description": description})
+
+    return {
+        "ok": True,
+        "query": query,
+        "count": len(matches[:limit]),
+        "total_matches": len(matches),
+        "operations": matches[:limit],
+    }
+
+
+@_tool
+def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """
+    Execute an operation discovered with tool_search.
+    Pass the operation's exact name and its arguments as a JSON object.
+    """
+    spec = _operation_tools.get(name)
+    if spec is None:
+        return {
+            "ok": False,
+            "error": f"Unknown operation: {name}",
+            "available_operations": sorted(_operation_tools.keys()),
+        }
+    if args is None:
+        args = {}
+    if not isinstance(args, dict):
+        return {"ok": False, "error": "args must be an object"}
+
+    try:
+        return spec["fn"](**args)
+    except TypeError as exc:
+        return {"ok": False, "error": f"Invalid arguments for {name}: {exc}"}
+
+
+@_operation(
+    "Run any shell command on the host. Use for apt, systemctl, docker, git, curl, or any CLI tool."
+)
 def run_command(
     command: str,
     cwd: str = "/",
@@ -321,7 +387,9 @@ def run_command(
     return _run_on_host(command, cwd=cwd, timeout=timeout)
 
 
-@_tool
+@_operation(
+    "Read a text file from the host filesystem with offset/limit pagination for large files."
+)
 def read_file(
     path: str,
     offset: int = 0,
@@ -395,7 +463,9 @@ def read_file(
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@_tool
+@_operation(
+    "Write a text file on the host filesystem, creating parent directories and optionally backing up existing files."
+)
 def write_file(path: str, content: str, make_backup: bool = True) -> dict[str, Any]:
     """
     Write a text file on the host filesystem. Creates parent directories if needed.
@@ -426,7 +496,9 @@ def write_file(path: str, content: str, make_backup: bool = True) -> dict[str, A
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@_tool
+@_operation(
+    "List files and directories on the host filesystem. Recursive mode is bounded by max_entries."
+)
 def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 200) -> dict[str, Any]:
     """
     List files and directories on the host filesystem.
@@ -490,7 +562,7 @@ def list_directory(path: str = "/", recursive: bool = False, max_entries: int = 
         return {"ok": False, "error": str(exc), "path": path}
 
 
-@_tool
+@_operation("List Docker containers. Set all_containers=true to include stopped containers.")
 def docker_ps(all_containers: bool = False) -> dict[str, Any]:
     """List Docker containers. Set all_containers=true to include stopped ones."""
     flag = "-a" if all_containers else ""
@@ -499,7 +571,7 @@ def docker_ps(all_containers: bool = False) -> dict[str, Any]:
     )
 
 
-@_tool
+@_operation("Get recent logs from a Docker container.")
 def docker_logs(container: str, tail: int = 100) -> dict[str, Any]:
     """Get logs from a Docker container."""
     tail = max(1, min(tail, 5000))
@@ -507,7 +579,7 @@ def docker_logs(container: str, tail: int = 100) -> dict[str, Any]:
     return _run_on_host(f"docker logs --tail {tail} {safe}", timeout=30)
 
 
-@_tool
+@_operation("Perform an action on a Docker container: restart, stop, start, pause, unpause, or rm.")
 def docker_action(container: str, action: str = "restart") -> dict[str, Any]:
     """
     Perform an action on a Docker container.
@@ -520,7 +592,7 @@ def docker_action(container: str, action: str = "restart") -> dict[str, Any]:
     return _run_on_host(f"docker {action} {safe}", timeout=60)
 
 
-@_tool
+@_operation("Check systemd service status, or list running services when service is empty.")
 def service_status(service: str = "") -> dict[str, Any]:
     """
     Check systemd service status. If service is empty, lists all running services.
@@ -534,7 +606,7 @@ def service_status(service: str = "") -> dict[str, Any]:
     return _run_on_host(f"systemctl status {safe} --no-pager", timeout=30)
 
 
-@_tool
+@_operation("Manage a systemd service: start, stop, restart, enable, disable, or reload.")
 def service_action(service: str, action: str = "restart") -> dict[str, Any]:
     """
     Manage a systemd service. Actions: start, stop, restart, enable, disable, reload
@@ -584,7 +656,7 @@ def _tail_audit_lines(n: int) -> tuple[list[str], int, bool]:
     return window_lines[-n:], total, exact_total
 
 
-@_tool
+@_operation("View recent entries from the MCP audit log.")
 def view_audit_log(lines: int = 50) -> dict[str, Any]:
     """View recent entries from the MCP audit log. Shows who did what and when.
 
@@ -647,9 +719,10 @@ async def status_page(request: Request) -> HTMLResponse:
         agent = e.get("agent", "?")
         tool = e.get("tool", "?")
         args = e.get("args", {})
-        # Show the most meaningful arg: command, container, service, path
+        # Show the most meaningful arg: invoked operation, command, container, service, path
         detail = (
-            args.get("command")
+            args.get("name")
+            or args.get("command")
             or args.get("container")
             or args.get("service")
             or args.get("path")
@@ -673,6 +746,7 @@ async def status_page(request: Request) -> HTMLResponse:
 
     agent_pills = "".join(f'<span class="pill">{a}</span>' for a in agents)
     tool_list = "".join(f'<li>{t}</li>' for t in tools)
+    operation_list = "".join(f'<li>{t}</li>' for t in sorted(_operation_tools.keys()))
     total_calls = len(entries)
 
     html = f"""<!DOCTYPE html>
@@ -735,8 +809,11 @@ async def status_page(request: Request) -> HTMLResponse:
       {agent_pills if agent_pills else '<span style="color:#475569">None configured</span>'}
     </div>
     <div class="card">
-      <h2>Available Tools</h2>
+      <h2>Always-on MCP Tools</h2>
       <ul>{tool_list}</ul>
+      <h2 style="margin-top:1rem">Discoverable Operations</h2>
+      <p style="color:#64748b;font-size:.78rem;margin-bottom:.5rem">Use <code>tool_search</code>, then <code>invoke_tool</code>.</p>
+      <ul>{operation_list}</ul>
     </div>
   </div>
 

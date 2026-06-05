@@ -50,6 +50,20 @@ exactly as if it had SSH root access, but with an audit log of every action.
 
 ## Available tools
 
+The server keeps the MCP tool list small. Clients see three always-on tools:
+
+| Tool | What it does |
+|---|---|
+| `health` | Server info, registered agents, visible tools, and discoverable operations |
+| `tool_search` | Search the hidden operation registry by keyword |
+| `invoke_tool` | Execute an operation discovered with `tool_search` |
+
+Operational tools are intentionally hidden from the always-on MCP schema list to
+reduce client context/tool overhead. Search for the operation you need, then call
+`invoke_tool` with its exact name and arguments.
+
+## Discoverable operations
+
 | Tool | What it does |
 |---|---|
 | `run_command` | Run any shell command on the host (docker, systemctl, apt, etc.). Process group is SIGKILLed on timeout so `ssh` / pipelines can't orphan children. |
@@ -62,7 +76,6 @@ exactly as if it had SSH root access, but with an audit log of every action.
 | `service_status` | Check systemd service status |
 | `service_action` | Start / stop / restart a systemd service |
 | `view_audit_log` | See who did what and when |
-| `health` | Server info and registered agents |
 
 ---
 
@@ -99,7 +112,7 @@ Every tool call is logged to `/audit/mcp-audit.log` inside the container (persis
 in the `mcp-audit` Docker volume). Each line is a JSON record:
 
 ```json
-{"ts": "2026-04-06T14:53:09Z", "agent": "claude", "tool": "run_command", "args": {"command": "docker ps"}, "ok": true, "duration_ms": 111}
+{"ts": "2026-04-06T14:53:09Z", "agent": "claude", "tool": "invoke_tool", "args": {"name": "run_command", "args": {"command": "docker ps"}}, "ok": true, "duration_ms": 111}
 ```
 
 To view recent activity, ask any connected AI: *"show me the last 50 audit log entries"*

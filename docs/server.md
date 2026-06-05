@@ -40,20 +40,33 @@ did something regardless of whether Roo Code was using GPT-4 or Claude at the ti
 
 ---
 
-## The `_tool` decorator
+## Tool registration
 
 ```python
 _registered_tools: list[str] = []
+_operation_tools: dict[str, dict[str, Any]] = {}
 
 def _tool(fn):
     wrapped = mcp.tool(fn)
     _registered_tools.append(fn.__name__)
     return wrapped
+
+def _operation(description: str):
+    ...
 ```
 
-All tools use `@_tool` instead of `@mcp.tool`. This is identical to `@mcp.tool`
-except it also appends the function name to `_registered_tools`, which the status
-page uses to list available tools without calling async code at request time.
+Always-on MCP tools use `@_tool` instead of `@mcp.tool`. This is identical to
+`@mcp.tool` except it also appends the function name to `_registered_tools`, which
+the status page uses to list visible tools without calling async code at request
+time.
+
+Host operations use `@_operation(...)`. They are callable through `invoke_tool`,
+but are not directly exposed in the MCP tool schema list. This keeps MCP clients
+from loading every powerful DevOps operation into every chat. The intended flow is:
+
+1. Call `tool_search(query)`.
+2. Pick the matching operation name.
+3. Call `invoke_tool(name, args)`.
 
 **Do not use `@mcp.tool` directly** — the tool will work but won't appear on the
 status page.
@@ -188,9 +201,22 @@ over time and are not automatically cleaned up.
 
 ## Tools reference
 
+### Always-on MCP tools
+
 ### `health()`
 Returns server metadata: name, current agent identity, container mode, registered
-agents, host root, audit log path. Useful as a first call to verify connectivity.
+agents, host root, audit log path, visible tools, and discoverable operations.
+Useful as a first call to verify connectivity.
+
+### `tool_search(query, limit)`
+Searches the hidden operation registry by operation name and description. Use this
+before calling `invoke_tool` unless you already know the exact operation name.
+
+### `invoke_tool(name, args)`
+Executes an operation discovered with `tool_search`. `args` must be a JSON object
+matching the target operation parameters.
+
+### Discoverable operations
 
 ### `run_command(command, cwd, timeout)`
 The most powerful tool. Runs any bash command on the host via nsenter. No restrictions.
@@ -263,8 +289,8 @@ called `Path(AUDIT_LOG_PATH).read_text()` on every invocation.
 ## The status page
 
 A Starlette `Route("/", status_page)` is added to the app before the FastMCP mount.
-It reads `_registered_tools` and the last 30 audit log entries (via
-`_tail_audit_lines`, which seeks to the last 512 KB of the file — not a full
+It reads `_registered_tools`, `_operation_tools`, and the last 30 audit log entries
+(via `_tail_audit_lines`, which seeks to the last 512 KB of the file — not a full
 read), renders them as HTML, and returns without auth.
 
 The page auto-refreshes via `<meta http-equiv="refresh" content="30">`. No JavaScript.
