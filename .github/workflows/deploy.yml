@@ -41,19 +41,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Deploy via SSH
+      - name: Deploy via Coolify API
         env:
-          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_HOST: ${{ secrets.VPS_HOST }}
-          COMPOSE_DIR: /data/coolify/services/vj5f76xet05bxwdq4utw1kho
+          COOLIFY_API_TOKEN: ${{ secrets.COOLIFY_API_TOKEN }}
+          COOLIFY_BASE_URL: ${{ secrets.COOLIFY_BASE_URL }}
+          COOLIFY_SERVICE_UUID: ${{ secrets.COOLIFY_SERVICE_UUID }}
         run: |
-          mkdir -p ~/.ssh
-          echo "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+          curl --fail-with-body --show-error --silent \
+            --get "$COOLIFY_BASE_URL/api/v1/deploy" \
+            --data-urlencode "uuid=$COOLIFY_SERVICE_UUID" \
+            --header "Authorization: Bearer $COOLIFY_API_TOKEN"
 
-          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
-            ai@$VPS_HOST \
-            "sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR pull devops-mcp && sudo docker compose -f $COMPOSE_DIR/docker-compose.yml --project-directory $COMPOSE_DIR up -d --no-deps devops-mcp"
-
-          echo "Deploy complete"
+          echo "Deploy queued in Coolify"
