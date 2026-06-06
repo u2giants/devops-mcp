@@ -35,7 +35,7 @@ The **ContextForge** sidecar (`contextforge-register`) is a separate process in 
 | [docs/configuration.md](docs/configuration.md) | Environment variables and GitHub Actions secrets |
 | [docs/deployment.md](docs/deployment.md) | Coolify deploy path, adding tokens, networking, volumes |
 | [docs/cicd.md](docs/cicd.md) | GitHub Actions pipeline, image tags, known limitations |
-| [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
+| [docs/tokens.md](docs/tokens.md) | Configured agent token variable names, how to add/revoke agents |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
 | [docs/gotchas.md](docs/gotchas.md) | Things that will bite you — read before making changes |
 | [docs/claude-desktop-setup.md](docs/claude-desktop-setup.md) | Claude desktop (Cowork) on Windows — mcp-remote + PowerShell setup script |

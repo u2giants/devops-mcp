@@ -21,7 +21,31 @@ There is no universal ignore-file standard across AI coding tools.
 When using any other AI tool, paste this file as your first message and follow the
 instructions in the "What to ignore" section.
 
-## 3. Repository structure
+## 3. Documentation map: what to read for each task
+
+Always start with:
+
+- `AGENTS.md`
+
+Then load additional docs only when relevant:
+
+| Task / question | Read these docs | Usually do not need |
+|---|---|---|
+| Quick repo orientation | `README.md`, `AGENTS.md` | Deep docs under `docs/` unless task requires them |
+| Modify MCP server behavior or project-owned code | `AGENTS.md`, `docs/server.md`, `docs/architecture.md` if system design is affected | `docs/deployment.md` unless deploy behavior changes |
+| Add, remove, or change hidden operations or visible tools | `AGENTS.md`, `docs/server.md`, `README.md` | Client setup docs unless endpoint/auth changes |
+| Add or change configuration, env vars, feature flags, secrets, or runtime settings | `AGENTS.md`, `docs/configuration.md`, `docs/deployment.md` if prod/runtime env is affected | `docs/architecture.md` unless architecture changes |
+| Change local setup, test/debug workflow, package dependencies, or tooling | `AGENTS.md`, `docs/development.md`, `requirements.txt`, `Dockerfile` if runtime changes | `docs/deployment.md` unless CI/CD changes |
+| Change deployment, Docker, CI/CD, hosting, release flow, rollback, or runtime environment | `AGENTS.md`, `docs/deployment.md`, `docs/cicd.md`, `docs/configuration.md`, `.github/workflows/deploy.yml`, `docker-compose.yml` | Local-only development docs unless needed |
+| Investigate bugs, production incidents, Cloudflare/Coolify problems, hangs, or auth failures | `AGENTS.md`, `docs/troubleshooting.md`, `docs/gotchas.md`, relevant architecture/deployment docs, `HANDOFF.md` if present | Client setup docs unless client config is involved |
+| Continue unfinished work | `AGENTS.md`, `HANDOFF.md`, relevant docs named inside `HANDOFF.md` | Docs unrelated to the handoff scope |
+| Work in client setup docs | `AGENTS.md`, `docs/claude-desktop-setup.md`, `docs/windsurf-roo-setup.md`, `docs/tokens.md` | Server internals unless connection behavior changes |
+| Claude Code session | `CLAUDE.md`, then `AGENTS.md` | Other docs unless task requires them |
+| Documentation-only cleanup | `AGENTS.md`, `README.md`, affected docs under `docs/` | Source files except as needed to verify accuracy |
+
+This map is intentionally task-based. Do not load every Markdown file by default.
+
+## 4. Repository structure
 
 Code we own:
 
@@ -62,7 +86,7 @@ Deployment files:
 - `docker-compose.yml`
 - `.github/workflows/deploy.yml`
 
-## 4. Prime Directive: custom-code boundary
+## 5. Prime Directive: custom-code boundary
 
 Our custom code lives here:
 
@@ -75,7 +99,7 @@ Everything else requires justification before touching. Do not scatter project
 logic into generated caches, local virtualenvs, vendored package directories, or
 runtime logs.
 
-## 5. Core modification inventory
+## 6. Core modification inventory
 
 No files outside the project-owned areas above are intentionally patched.
 
@@ -83,7 +107,7 @@ No files outside the project-owned areas above are intentionally patched.
 |---|---|---|---|
 | — | — | — | — |
 
-## 6. Task-to-file navigation
+## 7. Task-to-file navigation: what to edit for common changes
 
 | Task | Files to touch | Files not to touch |
 |---|---|---|
@@ -95,7 +119,7 @@ No files outside the project-owned areas above are intentionally patched.
 | Change image build or deploy behavior | `.github/workflows/deploy.yml`, `docs/deployment.md`, `docs/cicd.md` | manual server builds |
 | Investigate production failure | `docs/troubleshooting.md`, status page, audit log via MCP/Coolify logs | live source edits on the VPS |
 
-## 7. Data model and external identifiers
+## 8. Data model and external identifiers
 
 Do not casually rename or regenerate these identifiers.
 
@@ -111,7 +135,7 @@ Do not casually rename or regenerate these identifiers.
 | Cloudflare tunnel ID | `aa2bbb47-3907-485d-a0fa-61f57af478d8` | Cloudflare, `docs/deployment.md` | Routes `mcp.designflow.app` |
 | Audit volume | `vj5f76xet05bxwdq4utw1kho_mcp-audit` | `docker-compose.yml`, Coolify | Holds `/audit/mcp-audit.log` |
 
-## 8. Container and service inventory
+## 9. Container and service inventory
 
 | Container/service | Purpose | Managed by | App/project ID | Image/source |
 |---|---|---|---|---|
@@ -121,7 +145,7 @@ Do not casually rename or regenerate these identifiers.
 | `contextforge-register` | One-shot registration of devops-mcp with ContextForge | Coolify compose sidecar | same Coolify service | `ghcr.io/ibm/mcp-context-forge:1.0.0-RC2` |
 | `cf-cloudflared` | Tunnel for ContextForge | Coolify compose sidecar | same Coolify service | `cloudflare/cloudflared:latest` |
 
-## 9. What to ignore
+## 10. What to ignore
 
 Do not load these into AI context unless the task explicitly requires them:
 
@@ -133,7 +157,7 @@ Do not load these into AI context unless the task explicitly requires them:
 - local `.env*` files
 - audit logs or copied runtime logs
 
-## 10. Intentional quirks and non-obvious decisions
+## 11. Intentional quirks and non-obvious decisions
 
 ### Always-on tools are intentionally tiny
 
@@ -240,7 +264,7 @@ Do not change because:
 Troubleshooting 502s through Traefik wastes time; check `cloudflared` and the
 backend container first.
 
-## 11. Credentials and environment
+## 12. Credentials and environment
 
 Never commit secret values.
 
@@ -264,7 +288,7 @@ Never commit secret values.
 | `CF_ADMIN_EMAIL` | ContextForge admin email | Coolify env | no | yes if ContextForge is enabled |
 | `CF_ADMIN_PASSWORD` | ContextForge admin password/basic auth password | Coolify env | no | yes if ContextForge is enabled |
 
-## 12. Deployment
+## 13. Deployment
 
 Real deployment path:
 
@@ -278,7 +302,7 @@ Real deployment path:
 - Rollback: pin `docker-compose.yml` to a `sha-<full_commit_sha>` image tag, commit, push, then let Coolify redeploy; or redeploy a previous Coolify deployment if available
 - SSH: not routine. Do not edit source or build images on the VPS. Use Coolify logs/terminal only for exceptional diagnosis.
 
-## 13. Critical incidents
+## 14. Critical incidents
 
 ### 2026-05-28 Long-running file/command calls could hang MCP workers
 
@@ -319,7 +343,7 @@ Rule added to prevent recurrence:
 Deployment is GitHub Actions to GHCR to Coolify API. Do not reintroduce SSH as
 the normal deploy path.
 
-## 14. Pending work
+## 15. Pending work
 
 | Status | Item | Owner/next action |
 |---|---|---|
