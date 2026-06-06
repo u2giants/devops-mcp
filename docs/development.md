@@ -64,7 +64,8 @@ Import and inspect the small tool surface:
 python - <<'PY'
 import server
 print(server.health()["always_on_tools"])
-print(server.tool_search("docker")["operations"][0])
+print(server.list_capabilities(category="docker", limit=1)["capabilities"][0])
+print(server.tool_search("docker")["operations"][0]["example_call"])
 PY
 ```
 
@@ -76,11 +77,12 @@ docker build -t devops-mcp:local .
 
 ## MCP development rules
 
-- Keep `tools/list` small: only `health`, `tool_search`, and `invoke_tool` should
-  be always-on unless there is a strong reason.
+- Keep `tools/list` small: only `health`, `list_capabilities`,
+  `get_capability_details`, `tool_search`, and `invoke_tool` should be always-on
+  unless there is a strong reason.
 - Add host/Docker/systemd/file/audit capabilities as hidden `@_operation`s.
-- Give every operation a clear description; `tool_search` exposes that text to
-  AI clients.
+- Give every operation a clear description; catalog/search/detail tools expose
+  that text and derived args/safety metadata to AI clients only when requested.
 - Keep process and file reads bounded. Do not add unbounded recursive filesystem
   walks or full-log reads.
 - Do not commit token values, audit logs, or local `.env` files.

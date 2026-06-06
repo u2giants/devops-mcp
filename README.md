@@ -53,21 +53,24 @@ exactly as if it had SSH root access, but with an audit log of every action.
 
 ## Available tools
 
-The server keeps the MCP tool list small. Clients see three always-on tools:
+The server keeps the MCP tool list small. Clients see five always-on tools:
 
 | Tool | What it does |
 |---|---|
 | `health` | Server info, registered agents, visible tools, and discoverable operations |
-| `tool_search` | Search the hidden operation registry by keyword |
+| `list_capabilities` | Browse the hidden operation catalog by category or safety class without invoking anything |
+| `get_capability_details` | Return one operation's full contract, args, examples, safety metadata, and related operations |
+| `tool_search` | Search the hidden operation registry by keyword and return structured invocation guidance |
 | `invoke_tool` | Execute an operation discovered with `tool_search` |
 
 Operational tools are intentionally hidden from the always-on MCP schema list to
-reduce client context/tool overhead. Search for the operation you need, then call
-`invoke_tool` with its exact name and arguments.
+reduce client context/tool overhead. Browse or search for the operation you need,
+optionally fetch details, then call `invoke_tool` with its exact name and
+arguments.
 
 The server also sends FastMCP session-level instructions telling clients to use
-this `tool_search` -> `invoke_tool` flow before host, Docker, systemd, file, or
-audit-log tasks.
+this browse/search/detail -> `invoke_tool` flow before host, Docker, systemd,
+file, or audit-log tasks.
 
 ## Discoverable operations
 

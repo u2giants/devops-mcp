@@ -141,9 +141,10 @@ Looks like:
 Most useful operations are missing from `tools/list`.
 
 Actually:
-Only `health`, `tool_search`, and `invoke_tool` are registered as always-on MCP
-tools. Operations such as `run_command`, `read_file`, `docker_ps`, and
-`service_status` live in a hidden registry and are executed through `invoke_tool`.
+Only `health`, `list_capabilities`, `get_capability_details`, `tool_search`, and
+`invoke_tool` are registered as always-on MCP tools. Operations such as
+`run_command`, `read_file`, `docker_ps`, and `service_status` live in a hidden
+registry and are executed through `invoke_tool`.
 
 Why:
 The server has root-level host access. Keeping the schema list small reduces
@@ -153,22 +154,24 @@ Do not change because:
 Registering every operation directly bloats every AI session and removes the
 explicit discovery step that session-level FastMCP instructions now reinforce.
 
-### `tool_search` returns invocation guidance as data
+### Catalog/search/detail tools return invocation guidance as data
 
 Looks like:
-The search result duplicates the operation name and a pseudo-call string.
+Catalog/search/detail results duplicate operation names, args, safety metadata,
+and pseudo-call strings.
 
 Actually:
-This is deliberate client guidance. Some MCP clients see only a small tool list,
-so `tool_search` must return enough text for the AI to construct the correct
-`invoke_tool` call without loading every hidden schema.
+This is deliberate client guidance. Some MCP clients see only a small tool list, so
+the catalog tools must return enough structured data for the AI to construct the
+correct `invoke_tool` call without loading every hidden schema into `tools/list`.
 
 Why:
 This keeps tool metadata lazy while still making capabilities discoverable.
 
 Do not change because:
 Returning only names makes agents guess argument shapes and increases failed or
-unsafe calls.
+unsafe calls. Registering every operation as a real MCP tool reintroduces context
+bloat.
 
 ### Auth is HTTP middleware, audit is FastMCP middleware
 
@@ -321,4 +324,5 @@ the normal deploy path.
 | Status | Item | Owner/next action |
 |---|---|---|
 | open | Update GitHub Actions versions if Node.js 20 action deprecation warnings become failing errors | Maintainer: bump affected marketplace actions and rerun workflow |
+| done | Add capability browsing, detail contracts, structured search, safety metadata, examples, and better invocation errors | Completed in this change |
 | done | Add FastMCP session-level discovery instructions and explicit operation descriptions | Completed in commit `a849ff4` |

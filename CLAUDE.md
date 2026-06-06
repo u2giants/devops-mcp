@@ -9,8 +9,8 @@ repo and applies to every AI coding session. This file is Claude Code-specific.
   Python caches, build outputs, logs, local env files, and coverage/cache folders.
 - Do not load audit logs or copied runtime logs unless the task explicitly asks
   for audit investigation.
-- Keep the MCP lazy-discovery pattern: `health`, `tool_search`, and `invoke_tool`
-  are the only always-on DevOps tools.
+- Keep the MCP lazy-discovery pattern: visible tools stay limited to `health`,
+  `list_capabilities`, `get_capability_details`, `tool_search`, and `invoke_tool`.
 
 ## Allowed operations
 

@@ -14,6 +14,8 @@ Designed to run inside a Docker container with host access via:
 from __future__ import annotations
 
 import contextvars
+import difflib
+import inspect
 import json
 import logging
 import os
@@ -167,8 +169,8 @@ class AuditMiddleware(McpMiddleware):
 # ---------------------------------------------------------------------------
 
 MCP_INSTRUCTIONS = """
-This DevOps MCP intentionally exposes only three always-on MCP tools:
-health, tool_search, and invoke_tool.
+This DevOps MCP intentionally exposes a small always-on MCP tool surface:
+health, list_capabilities, get_capability_details, tool_search, and invoke_tool.
 
 For every host, Docker, systemd, file, or audit-log task, call tool_search first
 to find the right hidden operation. Then call invoke_tool with the exact operation
@@ -176,10 +178,12 @@ name and an args object matching the operation description. Do not assume direct
 tools such as run_command, docker_ps, read_file, or service_status are listed in
 tools/list; they are discoverable operations to keep client context small.
 
-Call health first when you need server context, visible tools, registered agents,
-or the complete operation-name list. Treat write-capable operations with care:
-this server has root-level host access, so prefer inspection commands before
-state-changing commands.
+Call list_capabilities to browse by category or safety class. Call
+get_capability_details for one operation's full contract, including args and
+examples. Call health first when you need server context, visible tools,
+registered agents, or the complete operation-name list. Treat write-capable
+operations with care: this server has root-level host access, so prefer
+inspection commands before state-changing commands.
 """.strip()
 
 mcp = FastMCP("devops-mcp", instructions=MCP_INSTRUCTIONS, middleware=[AuditMiddleware()])
@@ -204,6 +208,141 @@ def _operation(description: str):
         return fn
 
     return decorator
+
+
+def _operation_category(name: str, description: str) -> str:
+    text = f"{name} {description}".lower()
+    if "docker" in text or "container" in text:
+        return "docker"
+    if "systemd" in text or "service" in text:
+        return "systemd"
+    if "file" in text or "directory" in text or "path" in text:
+        return "files"
+    if "audit" in text or "log" in text:
+        return "audit"
+    if "shell" in text or "command" in text or "host" in text:
+        return "host"
+    return "system"
+
+
+def _operation_safety(name: str, description: str) -> dict[str, Any]:
+    text = f"{name} {description}".lower()
+    destructive_terms = (" rm", "remove", "delete", "overwrite", "write/edit", "disable")
+    state_terms = ("restart", "start", "stop", "reload", "enable", "disable", "write", "action", "manage", "rm")
+    destructive = any(term in text for term in destructive_terms)
+    state_changing = destructive or any(term in text for term in state_terms)
+    return {
+        "classification": "destructive" if destructive else ("state_changing" if state_changing else "read_only"),
+        "read_only": not state_changing,
+        "state_changing": state_changing,
+        "destructive": destructive,
+        "preview_supported": False,
+        "reversible": not destructive,
+        "requires_confirmation": False,
+        "boundary": "root-equivalent host access; inspect before changing state",
+    }
+
+
+def _operation_params(fn) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    required: list[dict[str, Any]] = []
+    optional: list[dict[str, Any]] = []
+    signature = inspect.signature(fn)
+    hints = getattr(fn, "__annotations__", {})
+    for param_name, param in signature.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        annotation = hints.get(param_name, "Any")
+        if hasattr(annotation, "__name__"):
+            type_name = annotation.__name__
+        else:
+            type_name = str(annotation).replace("typing.", "")
+        entry: dict[str, Any] = {
+            "name": param_name,
+            "type": type_name,
+        }
+        if param.default is not inspect._empty:
+            entry["default"] = param.default
+            optional.append(entry)
+        else:
+            required.append(entry)
+    return required, optional
+
+
+def _example_value(param_name: str, type_name: str) -> Any:
+    if param_name in {"container"}:
+        return "nginx"
+    if param_name in {"service"}:
+        return "nginx.service"
+    if param_name in {"path"}:
+        return "/var/log/syslog"
+    if param_name in {"directory"}:
+        return "/var/log"
+    if param_name in {"command"}:
+        return "docker ps"
+    if param_name in {"content"}:
+        return "file contents"
+    if param_name in {"action"}:
+        return "restart"
+    if "int" in type_name:
+        return 100
+    if "bool" in type_name:
+        return False
+    return f"<{param_name}>"
+
+
+def _operation_contract(name: str, spec: dict[str, Any], include_related: bool = False) -> dict[str, Any]:
+    description = str(spec["description"])
+    fn = spec["fn"]
+    required, optional = _operation_params(fn)
+    category = _operation_category(name, description)
+    safety = _operation_safety(name, description)
+    example_args: dict[str, Any] = {}
+    for entry in required:
+        example_args[entry["name"]] = _example_value(entry["name"], entry["type"])
+    for entry in optional:
+        if entry["name"] in {"tail", "lines", "limit"}:
+            example_args[entry["name"]] = entry.get("default", 100)
+        elif entry["name"] == "all_containers":
+            example_args[entry["name"]] = True
+    contract: dict[str, Any] = {
+        "name": name,
+        "summary": description,
+        "when_to_use": description,
+        "category": category,
+        "target_scope": "production VPS host",
+        "safety": safety,
+        "required_args": required,
+        "optional_args": optional,
+        "example_call": {
+            "name": name,
+            "args": example_args,
+        },
+        "copy_paste": f'invoke_tool(name="{name}", args={json.dumps(example_args)})',
+        "common_failures": [
+            "unknown operation name; call tool_search or list_capabilities",
+            "missing required argument; call get_capability_details for the expected args",
+            "host command timed out; split long work into background job plus polling",
+        ],
+    }
+    if include_related:
+        related = [
+            other_name
+            for other_name, other_spec in sorted(_operation_tools.items())
+            if other_name != name and _operation_category(other_name, str(other_spec["description"])) == category
+        ][:8]
+        contract["related_tools"] = related
+    return contract
+
+
+def _operation_categories() -> list[str]:
+    return sorted({
+        _operation_category(name, str(spec["description"]))
+        for name, spec in _operation_tools.items()
+    })
+
+
+def _close_operation_names(name: str) -> list[str]:
+    return difflib.get_close_matches(name, sorted(_operation_tools.keys()), n=5, cutoff=0.35)
 
 # ---------------------------------------------------------------------------
 # Host command execution helpers
@@ -333,7 +472,66 @@ def health() -> dict[str, Any]:
         "audit_log": AUDIT_LOG_PATH,
         "always_on_tools": sorted(_registered_tools),
         "available_operations": sorted(_operation_tools.keys()),
+        "operation_categories": _operation_categories(),
+        "catalog_tools": ["list_capabilities", "get_capability_details", "tool_search"],
     }
+
+
+@_tool
+def list_capabilities(category: str = "", safety: str = "", limit: int = 100) -> dict[str, Any]:
+    """
+    Browse the hidden DevOps operation catalog without invoking anything.
+    Optional filters: category (docker, files, systemd, audit, host, system) and
+    safety (read_only, state_changing, destructive). Returns compact contracts;
+    call get_capability_details for full details on one operation.
+    """
+    limit = max(1, min(limit, 200))
+    category_filter = category.strip().lower()
+    safety_filter = safety.strip().lower()
+    capabilities: list[dict[str, Any]] = []
+    for name, spec in sorted(_operation_tools.items()):
+        contract = _operation_contract(name, spec)
+        if category_filter and contract["category"] != category_filter:
+            continue
+        classification = contract["safety"]["classification"]
+        if safety_filter and classification != safety_filter:
+            continue
+        capabilities.append({
+            "name": contract["name"],
+            "summary": contract["summary"],
+            "category": contract["category"],
+            "safety": contract["safety"],
+            "required_args": contract["required_args"],
+            "optional_args": contract["optional_args"],
+            "example_call": contract["example_call"],
+        })
+    return {
+        "ok": True,
+        "categories": _operation_categories(),
+        "safety_classes": ["read_only", "state_changing", "destructive"],
+        "count": len(capabilities[:limit]),
+        "total_matches": len(capabilities),
+        "capabilities": capabilities[:limit],
+        "boundaries": [
+            "No Kubernetes-specific operations are defined.",
+            "No preview/approval layer exists for DevOps operations.",
+            "Operations run with root-equivalent host access through nsenter, /host, and Docker socket.",
+        ],
+    }
+
+
+@_tool
+def get_capability_details(name: str) -> dict[str, Any]:
+    """Return the full contract for one hidden DevOps operation."""
+    spec = _operation_tools.get(name)
+    if spec is None:
+        return {
+            "ok": False,
+            "error": f"Unknown operation: {name}",
+            "nearby_matches": _close_operation_names(name),
+            "hint": "Call list_capabilities or tool_search to discover exact operation names.",
+        }
+    return {"ok": True, "capability": _operation_contract(name, spec, include_related=True)}
 
 
 @_tool
@@ -351,11 +549,7 @@ def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
         description = str(spec["description"])
         haystack = f"{name} {description}".lower()
         if not terms or all(term in haystack for term in terms):
-            matches.append({
-                "name": name,
-                "description": description,
-                "invoke": f'invoke_tool(name="{name}", args={{...}})',
-            })
+            matches.append(_operation_contract(name, spec, include_related=True))
 
     return {
         "ok": True,
@@ -378,7 +572,8 @@ def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]
         return {
             "ok": False,
             "error": f"Unknown operation: {name}",
-            "available_operations": sorted(_operation_tools.keys()),
+            "nearby_matches": _close_operation_names(name),
+            "hint": "Call tool_search, list_capabilities, or get_capability_details with an exact operation name.",
         }
     if args is None:
         args = {}
@@ -388,7 +583,14 @@ def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]
     try:
         return spec["fn"](**args)
     except TypeError as exc:
-        return {"ok": False, "error": f"Invalid arguments for {name}: {exc}"}
+        contract = _operation_contract(name, spec)
+        return {
+            "ok": False,
+            "error": f"Invalid arguments for {name}: {exc}",
+            "expected_required_args": contract["required_args"],
+            "expected_optional_args": contract["optional_args"],
+            "example_call": contract["example_call"],
+        }
 
 
 @_operation(

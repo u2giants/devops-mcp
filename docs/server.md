@@ -61,7 +61,7 @@ the status page uses to list visible tools without calling async code at request
 time.
 
 The `FastMCP(..., instructions=MCP_INSTRUCTIONS, ...)` constructor gives clients
-session-level guidance: use `tool_search` first for DevOps operations, then call
+session-level guidance: browse/search/detail DevOps operations first, then call
 `invoke_tool` with the exact returned operation name. Clients may incorporate this
 hint into their system prompt during initialization.
 
@@ -69,8 +69,8 @@ Host operations use `@_operation(...)`. They are callable through `invoke_tool`,
 but are not directly exposed in the MCP tool schema list. This keeps MCP clients
 from loading every powerful DevOps operation into every chat. The intended flow is:
 
-1. Call `tool_search(query)`.
-2. Pick the matching operation name.
+1. Call `list_capabilities(category?, safety?)` for orientation, or `tool_search(query)`.
+2. Call `get_capability_details(name)` when exact args/examples are needed.
 3. Call `invoke_tool(name, args)`.
 
 **Do not use `@mcp.tool` directly** — the tool will work but won't appear on the
@@ -213,8 +213,18 @@ Returns server metadata: name, current agent identity, container mode, registere
 agents, host root, audit log path, visible tools, and discoverable operations.
 Useful as a first call to verify connectivity.
 
+### `list_capabilities(category, safety, limit)`
+Browses the hidden operation catalog without invoking anything. Returns compact
+structured records with category, safety class, required/optional args, and an
+example call. Optional filters avoid loading irrelevant catalog slices.
+
+### `get_capability_details(name)`
+Returns one operation's full contract, including example invocation, common
+failures, and related tools. Use this before invoking an unfamiliar operation.
+
 ### `tool_search(query, limit)`
-Searches the hidden operation registry by operation name and description. Use this
+Searches the hidden operation registry by operation name and description. Returns
+structured operation contracts and explicit `invoke_tool(...)` shapes. Use this
 before calling `invoke_tool` unless you already know the exact operation name.
 
 ### `invoke_tool(name, args)`
