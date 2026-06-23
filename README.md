@@ -39,6 +39,7 @@ The **ContextForge** sidecar (`contextforge-register`) is a separate process in 
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
 | [docs/gotchas.md](docs/gotchas.md) | Things that will bite you — read before making changes |
 | [docs/claude-desktop-setup.md](docs/claude-desktop-setup.md) | Claude desktop (Cowork) on Windows — mcp-remote + PowerShell setup script |
+| [docs/1password.md](docs/1password.md) | Pull secrets from 1Password via the MCP server or `op` CLI instead of hardcoding |
 
 ---
 
