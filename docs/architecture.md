@@ -2,9 +2,14 @@
 
 ## What this system is
 
-A server that lets AI tools (Claude, Gemini, ChatGPT, Roo Code, etc.) control the VPS
-over the internet — installing software, managing Docker containers, editing files,
-restarting services — as if they had SSH root access.
+A server that lets AI tools (Claude, Gemini, ChatGPT, Roo Code, etc.) inspect and,
+when necessary, repair the VPS over the internet — running commands, managing Docker
+containers, editing files, restarting services — as if they had SSH root access.
+
+That root-equivalent access is for diagnostics and break-glass repair, not normal
+configuration management. Durable host/OS changes are owned by `/worksp/ansible`
+([u2giants/ansible](https://github.com/u2giants/ansible)) and should be made as
+Ansible PRs applied by GitHub Actions.
 
 The protocol that carries these instructions is called
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io), which is now supported
@@ -185,6 +190,12 @@ See [cicd.md](cicd.md) for full details.
 
 - **Not a firewall or security layer.** Any agent with a valid token can do anything.
   The auth is about identity/logging, not access control.
+- **Not the source of truth for host configuration.** Packages, users, firewall,
+  SSH/sudo, Docker engine or daemon config, systemd units/timers, cron, `/etc`,
+  `/usr/local/bin`, `/usr/local/sbin`, Cloudflare Tunnel 1, Coolify host glue, and
+  the backup/DNS watchdogs belong in `/worksp/ansible`. Break-glass direct repairs
+  must be followed by an Ansible PR to capture or reconcile drift. Warn-mode policy
+  reminders do not replace that PR/apply flow.
 - **Not managed by Coolify's UI.** The container is started with `docker run` manually.
   Coolify can see it (it has Coolify labels) but does not control its lifecycle.
   See [deployment.md](deployment.md) for why and what this means operationally.

@@ -1,6 +1,7 @@
 # DevOps MCP Server
 
-MCP server that gives AI agents full access to the VPS for devops and sysadmin tasks.
+MCP server that gives AI agents diagnostic and break-glass access to the VPS for
+devops and sysadmin tasks.
 
 **Live URL:** `https://mcp.designflow.app/mcp`
 **Status page:** `https://mcp.designflow.app/`
@@ -45,6 +46,23 @@ Connects any AI tool (Claude, Gemini, ChatGPT, etc.) to the server via the
 [Model Context Protocol](https://modelcontextprotocol.io). The AI can then run
 commands, manage Docker containers, edit files, restart services, and more —
 exactly as if it had SSH root access, but with an audit log of every action.
+
+## Host change policy
+
+DevOps MCP is diagnostic and emergency tooling. Durable host/OS changes are owned
+by the canonical Ansible repo: `/worksp/ansible`
+([u2giants/ansible](https://github.com/u2giants/ansible)).
+
+Do **not** use MCP root access for durable infrastructure changes. Make a PR in
+`/worksp/ansible` and let GitHub Actions apply it. This includes packages, users,
+firewall, SSH/sudo, Docker engine or daemon config, systemd units/timers, cron,
+`/etc`, `/usr/local/bin`, `/usr/local/sbin`, Cloudflare Tunnel 1, Coolify host
+glue, and the backup/DNS watchdogs.
+
+Break-glass direct host repair is allowed only when needed to restore service.
+Follow it with an Ansible PR that captures or reconciles the drift. Warn-mode
+policy reminders may appear during MCP use, but they do not replace the
+PR/apply flow.
 
 ---
 

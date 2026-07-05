@@ -197,6 +197,14 @@ The most powerful tool. Runs any bash command on the host via nsenter. No restri
 Output is capped at `MAX_OUTPUT_CHARS` (60,000 by default). Long-running commands
 (> `timeout` seconds, default 120) are killed and return an error.
 
+Use it for diagnostics and break-glass repair, not durable host configuration.
+Packages, users, firewall, SSH/sudo, Docker engine or daemon config, systemd
+units/timers, cron, `/etc`, `/usr/local/bin`, `/usr/local/sbin`, Cloudflare
+Tunnel 1, Coolify host glue, and the backup/DNS watchdogs belong in
+`/worksp/ansible` ([u2giants/ansible](https://github.com/u2giants/ansible)).
+Break-glass direct repairs must be followed by an Ansible PR to capture or
+reconcile drift; warn-mode reminders do not replace that PR/apply flow.
+
 ### `read_file(path, offset, limit, max_bytes)`
 Returns line-numbered content. `offset` and `limit` are line numbers (not bytes).
 Max `limit` is 10,000 lines per call.

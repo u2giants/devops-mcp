@@ -17,6 +17,7 @@ import contextvars
 import json
 import logging
 import os
+import re
 import shlex
 import signal
 import subprocess
@@ -45,6 +46,8 @@ HOST_ROOT = os.environ.get("HOST_ROOT", "/host")
 AUDIT_LOG_PATH = os.environ.get("AUDIT_LOG_PATH", "/audit/mcp-audit.log")
 MAX_OUTPUT = int(os.environ.get("MAX_OUTPUT_CHARS", "60000"))
 DEFAULT_TIMEOUT = int(os.environ.get("DEFAULT_TIMEOUT", "120"))
+ANSIBLE_POLICY_MODE = os.environ.get("ANSIBLE_POLICY_MODE", "warn").lower()
+ANSIBLE_REPO = os.environ.get("ANSIBLE_REPO", "/worksp/ansible")
 
 # ---------------------------------------------------------------------------
 # Token registry — reads every TOKEN_* env var at startup
@@ -195,6 +198,234 @@ def _host_path(path: str) -> str:
     return path
 
 
+HOST_MANAGED_PATHS = (
+    "/etc",
+    "/usr/local/bin",
+    "/usr/local/sbin",
+    "/opt/backrest",
+)
+COOLIFY_CONFIG_PATHS = (
+    "/data/coolify",
+)
+
+APT_MUTATION_COMMANDS = {
+    "install",
+    "remove",
+    "purge",
+    "upgrade",
+    "full-upgrade",
+    "dist-upgrade",
+    "autoremove",
+    "autoclean",
+    "clean",
+    "update",
+}
+DPKG_MUTATION_FLAGS = {
+    "-i",
+    "--install",
+    "-r",
+    "--remove",
+    "-P",
+    "--purge",
+    "--configure",
+    "--unpack",
+}
+SYSTEMCTL_MUTATION_COMMANDS = {
+    "start",
+    "stop",
+    "restart",
+    "reload",
+    "enable",
+    "disable",
+    "mask",
+    "unmask",
+    "daemon-reload",
+    "reset-failed",
+}
+DOCKER_MUTATION_COMMANDS = {
+    "run",
+    "start",
+    "stop",
+    "restart",
+    "kill",
+    "rm",
+    "rmi",
+    "pause",
+    "unpause",
+    "create",
+    "exec",
+    "pull",
+    "push",
+    "build",
+    "tag",
+    "commit",
+    "rename",
+    "update",
+    "network",
+    "volume",
+    "compose",
+}
+DOCKER_COMPOSE_MUTATION_COMMANDS = {
+    "up",
+    "down",
+    "start",
+    "stop",
+    "restart",
+    "kill",
+    "rm",
+    "pull",
+    "build",
+    "create",
+    "run",
+    "exec",
+    "pause",
+    "unpause",
+}
+IPTABLES_MUTATION_FLAGS = {
+    "-A",
+    "--append",
+    "-C",
+    "--check",
+    "-D",
+    "--delete",
+    "-I",
+    "--insert",
+    "-R",
+    "--replace",
+    "-F",
+    "--flush",
+    "-X",
+    "--delete-chain",
+    "-N",
+    "--new-chain",
+    "-P",
+    "--policy",
+    "-Z",
+    "--zero",
+}
+
+
+def _ansible_policy_warning(reason: str) -> str | None:
+    if ANSIBLE_POLICY_MODE != "warn":
+        return None
+    return (
+        f"Ansible policy warning: {reason}. Host-managed infrastructure should "
+        f"be changed in {ANSIBLE_REPO} and applied via PR/GitHub Actions. "
+        "This is warn-only; the requested action was not blocked."
+    )
+
+
+def _add_ansible_policy_warning(
+    result: dict[str, Any],
+    warning: str | None,
+) -> dict[str, Any]:
+    if warning:
+        result["ansible_policy_warning"] = warning
+    return result
+
+
+def _is_host_managed_path(path: str) -> bool:
+    normalized = path if path.startswith("/") else f"/{path}"
+    return any(
+        normalized == managed or normalized.startswith(f"{managed}/")
+        for managed in HOST_MANAGED_PATHS
+    ) or any(
+        normalized == managed or normalized.startswith(f"{managed}/")
+        for managed in COOLIFY_CONFIG_PATHS
+    )
+
+
+def _command_tokens(command: str) -> list[str]:
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return []
+
+
+def _first_non_assignment(tokens: list[str]) -> int:
+    for i, token in enumerate(tokens):
+        if "=" in token and not token.startswith("-") and token.split("=", 1)[0].isidentifier():
+            continue
+        if token in {"sudo", "env", "command"}:
+            continue
+        return i
+    return 0
+
+
+def _next_command_token(tokens: list[str], start: int) -> str:
+    for token in tokens[start:]:
+        if not token.startswith("-"):
+            return token
+    return ""
+
+
+def _path_write_in_command(command: str) -> bool:
+    managed_path = r"(?:/host)?(?:/etc|/usr/local/(?:bin|sbin)|/opt/backrest|/data/coolify)(?:\b|/)"
+    write_patterns = [
+        rf"(?:^|[\s;&|])(?:install|cp|mv|rm|mkdir|touch|chmod|chown|ln)\b[^\n;&|]*{managed_path}",
+        rf"(?:^|[\s;&|])(?:tee|dd)\b[^\n;&|]*{managed_path}",
+        rf"(?:^|[\s;&|])sed\b[^\n;&|]*\s-i(?:\s|$)[^\n;&|]*{managed_path}",
+        rf"(?:>|>>)\s*{managed_path}",
+    ]
+    return any(re.search(pattern, command) for pattern in write_patterns)
+
+
+def _run_command_policy_warning(command: str) -> str | None:
+    tokens = _command_tokens(command)
+    lowered = command.lower()
+
+    if _path_write_in_command(command):
+        return _ansible_policy_warning("command appears to write host-managed paths")
+
+    mutation_keywords = (
+        r"\bapt(?:-get)?\s+(?:install|remove|purge|upgrade|full-upgrade|dist-upgrade|autoremove|autoclean|clean|update)\b",
+        r"\bdpkg\s+(?:-[irP]\b|--(?:install|remove|purge|configure|unpack)\b)",
+        r"\bsystemctl\s+(?:start|stop|restart|reload|enable|disable|mask|unmask|daemon-reload|reset-failed)\b",
+        r"\bcrontab\b(?!\s+-l\b)",
+        r"\bdocker\s+(?:run|start|stop|restart|kill|rm|rmi|pause|unpause|create|exec|pull|push|build|tag|commit|rename|update|network|volume|compose)\b",
+        r"\bnft\s+(?:add|delete|insert|replace|flush|reset)\b",
+    )
+    if any(re.search(pattern, lowered) for pattern in mutation_keywords):
+        return _ansible_policy_warning("command appears to mutate host-managed infrastructure")
+
+    if not tokens:
+        return None
+
+    start = _first_non_assignment(tokens)
+    cmd = Path(tokens[start]).name if start < len(tokens) else ""
+    rest = tokens[start + 1:]
+
+    if cmd in {"apt", "apt-get"} and rest and rest[0] in APT_MUTATION_COMMANDS:
+        return _ansible_policy_warning("apt changes should be managed through Ansible")
+    if cmd == "dpkg" and any(token in DPKG_MUTATION_FLAGS for token in rest):
+        return _ansible_policy_warning("dpkg changes should be managed through Ansible")
+    if cmd == "systemctl" and rest and rest[0] in SYSTEMCTL_MUTATION_COMMANDS:
+        return _ansible_policy_warning("systemd service changes should be managed through Ansible")
+    if cmd == "service" and len(rest) >= 2 and rest[1] in SYSTEMCTL_MUTATION_COMMANDS:
+        return _ansible_policy_warning("systemd service changes should be managed through Ansible")
+    if cmd == "crontab" and "-l" not in rest:
+        return _ansible_policy_warning("crontab changes should be managed through Ansible")
+    if cmd in {"iptables", "ip6tables", "iptables-restore", "ip6tables-restore"}:
+        if "restore" in cmd or any(token in IPTABLES_MUTATION_FLAGS for token in rest):
+            return _ansible_policy_warning("firewall changes should be managed through Ansible")
+    if cmd == "nft" and rest and rest[0] not in {"list", "monitor"}:
+        return _ansible_policy_warning("firewall changes should be managed through Ansible")
+    if cmd == "docker" and rest:
+        docker_cmd = _next_command_token(rest, 0)
+        if docker_cmd == "compose":
+            compose_cmd = _next_command_token(rest, rest.index("compose") + 1)
+            if compose_cmd in DOCKER_COMPOSE_MUTATION_COMMANDS:
+                return _ansible_policy_warning("Docker changes should go through the owning infrastructure/app workflow")
+        elif docker_cmd in DOCKER_MUTATION_COMMANDS:
+            return _ansible_policy_warning("Docker changes should go through the owning infrastructure/app workflow")
+    if cmd == "docker-compose":
+        compose_cmd = _next_command_token(rest, 0)
+        if compose_cmd in DOCKER_COMPOSE_MUTATION_COMMANDS:
+            return _ansible_policy_warning("Docker changes should go through the owning infrastructure/app workflow")
+
+    return None
+
+
 def _run_on_host(
     command: str,
     cwd: str = "/",
@@ -302,6 +533,8 @@ def health() -> dict[str, Any]:
         "registered_agents": list(TOKENS.values()),
         "host_root": HOST_ROOT if IN_CONTAINER else "/",
         "audit_log": AUDIT_LOG_PATH,
+        "ansible_policy_mode": ANSIBLE_POLICY_MODE,
+        "ansible_repo": ANSIBLE_REPO,
     }
 
 
@@ -318,7 +551,9 @@ def run_command(
     """
     if not command.strip():
         return {"ok": False, "error": "command cannot be empty"}
-    return _run_on_host(command, cwd=cwd, timeout=timeout)
+    warning = _run_command_policy_warning(command)
+    result = _run_on_host(command, cwd=cwd, timeout=timeout)
+    return _add_ansible_policy_warning(result, warning)
 
 
 @_tool
@@ -416,14 +651,25 @@ def write_file(path: str, content: str, make_backup: bool = True) -> dict[str, A
 
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
-        return {
+        result = {
             "ok": True,
             "path": path,
             "bytes_written": len(content.encode("utf-8")),
             "backup": backup_path,
         }
+        warning = (
+            _ansible_policy_warning(f"write_file targets host-managed path {path}")
+            if _is_host_managed_path(path)
+            else None
+        )
+        return _add_ansible_policy_warning(result, warning)
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "path": path}
+        return _add_ansible_policy_warning(
+            {"ok": False, "error": str(exc), "path": path},
+            _ansible_policy_warning(f"write_file targets host-managed path {path}")
+            if _is_host_managed_path(path)
+            else None,
+        )
 
 
 @_tool
@@ -517,7 +763,13 @@ def docker_action(container: str, action: str = "restart") -> dict[str, Any]:
     if action not in allowed:
         return {"ok": False, "error": f"Action must be one of: {sorted(allowed)}"}
     safe = shlex.quote(container)
-    return _run_on_host(f"docker {action} {safe}", timeout=60)
+    result = _run_on_host(f"docker {action} {safe}", timeout=60)
+    return _add_ansible_policy_warning(
+        result,
+        _ansible_policy_warning(
+            f"docker_action {action} on {container} directly mutates Docker state"
+        ),
+    )
 
 
 @_tool
@@ -543,7 +795,13 @@ def service_action(service: str, action: str = "restart") -> dict[str, Any]:
     if action not in allowed:
         return {"ok": False, "error": f"Action must be one of: {sorted(allowed)}"}
     safe = shlex.quote(service)
-    return _run_on_host(f"systemctl {action} {safe}", timeout=60)
+    result = _run_on_host(f"systemctl {action} {safe}", timeout=60)
+    return _add_ansible_policy_warning(
+        result,
+        _ansible_policy_warning(
+            f"service_action {action} on {service} directly mutates systemd state"
+        ),
+    )
 
 
 def _tail_audit_lines(n: int) -> tuple[list[str], int, bool]:
@@ -786,4 +1044,3 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8765"))
     host = os.environ.get("BIND_HOST", "0.0.0.0")
     uvicorn.run(app, host=host, port=port, log_level="info")
-

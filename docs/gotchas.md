@@ -16,7 +16,24 @@ pulls it, done.
 
 ---
 
-## 2. Adding a token does NOT require a code push
+## 2. Durable host changes go through Ansible
+
+DevOps MCP is diagnostic and emergency tooling. Durable host/OS changes belong in
+`/worksp/ansible` ([u2giants/ansible](https://github.com/u2giants/ansible)) and
+are applied by GitHub Actions.
+
+Do not use MCP root access to make lasting infra changes to packages, users,
+firewall, SSH/sudo, Docker engine or daemon config, systemd units/timers, cron,
+`/etc`, `/usr/local/bin`, `/usr/local/sbin`, Cloudflare Tunnel 1, Coolify host
+glue, or the backup/DNS watchdogs. Make an Ansible PR instead.
+
+Break-glass direct repair is allowed only to restore service. Afterward, open an
+Ansible PR to capture or reconcile the drift. Warn-mode policy reminders are just
+reminders; they do not replace the PR/apply flow.
+
+---
+
+## 3. Adding a token does NOT require a code push
 
 Tokens are Coolify environment variables, not code. To add or rotate a token:
 
@@ -26,7 +43,7 @@ Coolify restarts the container with the new env var automatically. No commit nee
 
 ---
 
-## 3. The docker-compose.yml in this repo is the source of truth for container config
+## 4. The docker-compose.yml in this repo is the source of truth for container config
 
 Coolify uses `docker-compose.yml` to define volumes, capabilities, mounts, and image.
 If you need to change container configuration (e.g. add a volume, change a capability),
@@ -35,7 +52,7 @@ Coolify UI — those changes will be lost on the next git-triggered redeploy.
 
 ---
 
-## 4. Coolify's restart API doesn't create new containers — only restarts existing ones
+## 5. Coolify's restart API doesn't create new containers — only restarts existing ones
 
 If you add a new service to `docker-compose.yml` (e.g. a sidecar), Coolify's
 `/restart` endpoint will not create it. You need to trigger a full redeploy via
@@ -44,7 +61,7 @@ the Coolify UI (Redeploy button) or run `docker compose up -d` manually in
 
 ---
 
-## 5. Routing goes through Cloudflare Tunnel — not Traefik
+## 6. Routing goes through Cloudflare Tunnel — not Traefik
 
 `mcp.designflow.app` is routed via the `cloudflared` sidecar container, identical
 to `ocgate` and `ocmc`. DNS is a proxied CNAME to the tunnel ID, not an A record
@@ -55,7 +72,7 @@ not Coolify configuration. Check with: `docker logs devops-mcp-cloudflared-1`
 
 ---
 
-## 6. The old gemini-mcp service is still on disk
+## 7. The old gemini-mcp service is still on disk
 
 `/etc/systemd/system/gemini-mcp.service` and `/home/ai/gemini-mcp/` still exist.
 The service is stopped and disabled. Do not re-enable it — it will conflict with
@@ -66,7 +83,7 @@ one runs as root with full host access. They are not compatible.
 
 ---
 
-## 7. `write_file` overwrites the entire file
+## 8. `write_file` overwrites the entire file
 
 The `write_file` tool replaces the entire file contents. It is not a patch or diff.
 If an AI calls `write_file("/etc/nginx/nginx.conf", content)`, it must provide the
@@ -78,7 +95,7 @@ Over time, directories with frequently-edited files will fill with `.bak` files.
 
 ---
 
-## 8. `run_command` output is capped at 60,000 characters
+## 9. `run_command` output is capped at 60,000 characters
 
 Commands that produce very long output (e.g. `cat large_file`, `docker logs` with
 thousands of lines, `find / -name "*.log"`) will be truncated. The response includes
@@ -89,7 +106,7 @@ through it, or use options to limit output (`tail -n 100`, `grep` filters, etc.)
 
 ---
 
-## 9. The status page is unauthenticated
+## 10. The status page is unauthenticated
 
 `https://mcp.designflow.app/` is publicly readable. It shows:
 - Which agent names are registered (but not their tokens)
@@ -103,7 +120,7 @@ in command-line args, etc.).
 
 ---
 
-## 10. nsenter silently fails without `pid: host`
+## 11. nsenter silently fails without `pid: host`
 
 If the container is started without `--pid host`, `nsenter --target 1` will enter
 the container's own init process (PID 1 inside the container, not the host). Commands
@@ -118,7 +135,7 @@ run_command("hostname")
 
 ---
 
-## 11. The `cwd` parameter in `run_command` is not fully wired through nsenter
+## 12. The `cwd` parameter in `run_command` is not fully wired through nsenter
 
 The `run_command` tool accepts a `cwd` parameter. In container mode, the intended
 working directory is passed as an env var (`NSENTER_CWD`) but the nsenter command
@@ -132,7 +149,7 @@ run_command("cd /home/ai/myproject && git status")
 
 ---
 
-## 12. Double middleware application
+## 13. Double middleware application
 
 In `create_app()`, the auth middleware is applied to both the outer Starlette app
 and the inner FastMCP app. This is needed to make the public status page work while
@@ -142,7 +159,7 @@ protected by default unless you add their paths to `PUBLIC_PATHS`.
 
 ---
 
-## 13. Coolify's service UUID must never change
+## 14. Coolify's service UUID must never change
 
 The UUID `vj5f76xet05bxwdq4utw1kho` appears in:
 - Container name
@@ -159,7 +176,7 @@ manually).
 
 ---
 
-## 14. GitHub Actions Node.js deprecation (deadline: June 2026)
+## 15. GitHub Actions Node.js deprecation (deadline: June 2026)
 
 The workflow uses `docker/build-push-action@v6`, `docker/login-action@v3`, and
 `docker/setup-buildx-action@v3` which run on Node.js 20. GitHub will force Node.js 24
@@ -168,7 +185,7 @@ build failures.
 
 ---
 
-## 15. There is no access control — only identity logging
+## 16. There is no access control — only identity logging
 
 Any agent with a valid token can do anything. Tokens are for identifying who did
 what in the audit log, not for limiting what they can do. There is no way to give
@@ -180,7 +197,7 @@ would need to be extended to check agent-specific allowlists per tool.
 
 ---
 
-## 16. `WWW-Authenticate` header must be present on every 401
+## 17. `WWW-Authenticate` header must be present on every 401
 
 **Discovered 2026-04-11.** Newer MCP clients (Windsurf / Roo Code with MCP
 2025-03-26 support) implement OAuth 2.1 discovery. When they receive a 401 response
@@ -208,7 +225,7 @@ See [troubleshooting.md](troubleshooting.md) for diagnosis and recovery steps.
 
 ---
 
-## 17. Roo Code's MCP client has a ~60-second transport timeout
+## 18. Roo Code's MCP client has a ~60-second transport timeout
 
 **Discovered 2026-04-11.** Roo Code (and likely Windsurf) has an internal MCP
 transport timeout of roughly 60–75 seconds. If `run_command` is given a `timeout`
@@ -232,10 +249,10 @@ See [troubleshooting.md](troubleshooting.md) for more workarounds.
 
 ---
 
-## 18. Server-side hangs are NOT the same as the Roo client timeout
+## 19. Server-side hangs are NOT the same as the Roo client timeout
 
 **Discovered 2026-05.** It's tempting to assume every `-32001` / "connection
-interrupted" is the client-side timeout described in #17. It's not. Four
+interrupted" is the client-side timeout described in #18. It's not. Four
 *server-side* blocking patterns existed and were fixed in commit `a712d08`:
 
 1. **`_run_on_host` used `subprocess.run`** — only the direct bash child got
@@ -251,7 +268,7 @@ interrupted" is the client-side timeout described in #17. It's not. Four
 4. **Audit-log reads loaded the whole file** on every call. Fixed by
    tail-from-end seek (last 512 KB); `total` becomes an estimate for big logs.
 
-**How to tell which one you're hitting:** the Roo client-timeout case (#17)
+**How to tell which one you're hitting:** the Roo client-timeout case (#18)
 leaves a *successful* audit entry behind — `ok: true, duration_ms: 90077`.
 A server-side hang leaves no audit entry at all, because the call never
 returned. If `view_audit_log` doesn't show the failed call, suspect this.

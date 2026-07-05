@@ -17,6 +17,23 @@ edit code locally
 - **Coolify is a consumer of pre-built images.** It pulls from GHCR. It does not build. Do not run `docker build` on the server.
 - **All secrets in GitHub Secrets.** Tokens, API keys, SSH keys — none in code, none in committed `.env` files. See [docs/cicd.md](docs/cicd.md) for the full secret list.
 
+## Host/OS Change Routing (STRICT)
+
+DevOps MCP is diagnostic and emergency tooling. Durable host/OS changes are owned
+by the canonical Ansible repo: `/worksp/ansible`
+([u2giants/ansible](https://github.com/u2giants/ansible)).
+
+Do **not** use MCP root access for durable infra changes. Make a PR in
+`/worksp/ansible` and let GitHub Actions apply it. This includes packages, users,
+firewall, SSH/sudo, Docker engine or daemon config, systemd units/timers, cron,
+`/etc`, `/usr/local/bin`, `/usr/local/sbin`, Cloudflare Tunnel 1, Coolify host
+glue, and the backup/DNS watchdogs.
+
+Break-glass direct host repair is allowed only when needed to restore service.
+Follow it with an Ansible PR that captures or reconciles the drift. Warn-mode
+policy reminders may appear during MCP use, but they do not replace the
+PR/apply flow.
+
 ## Live URL
 
 `https://mcp.designflow.app/mcp`
@@ -85,11 +102,10 @@ All containers on this VPS are managed by Coolify, which names them using intern
 **When a new container is added to this project:**
 
 1. Find its Coolify-assigned name: `docker ps --format "{{.Names}}"`
-2. Open the rename script: `sudo nano /usr/local/bin/docker-rename-containers.sh`
-3. Add an entry to the appropriate map:
+2. Update the host-owned rename script through `/worksp/ansible`, not by editing `/usr/local/bin/docker-rename-containers.sh` directly on the server.
+3. Add an entry to the appropriate map in the Ansible-managed source:
    - If the name ends in a build number suffix (e.g., `-101538519687`), use `PREFIX_RENAMES` with the stable prefix
    - If the name is fixed (e.g., a database UUID with no suffix), use `RENAMES` with the exact name
 4. Decide on a readable name following the pattern `{project}-{function}` (e.g., `twenty-postgres`, `openmanus-backend`)
-5. The watcher picks up script changes immediately — no restart needed
-6. Run `sudo /usr/local/bin/docker-rename-containers.sh` to apply to any already-running containers
-7. Update the name map table in this file and in every other project's CLAUDE.md on this VPS
+5. Let the Ansible PR/apply flow deploy it; do not patch the live host with MCP root access except for break-glass repair
+6. Update the name map table in this file and in every other project's CLAUDE.md on this VPS
