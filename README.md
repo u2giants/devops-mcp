@@ -31,12 +31,16 @@ The **ContextForge** sidecar (`contextforge-register`) is a separate process in 
 |---|---|
 | [docs/architecture.md](docs/architecture.md) | How all the pieces fit together, nsenter, middleware, Cloudflare Tunnel |
 | [docs/server.md](docs/server.md) | Every section of server.py explained |
-| [docs/deployment.md](docs/deployment.md) | The `docker run` command, adding tokens, networking, volumes |
+| [AGENTS.md](AGENTS.md) | Canonical operating guide for engineers and AI sessions |
+| [docs/development.md](docs/development.md) | Local setup, checks, and MCP development rules |
+| [docs/configuration.md](docs/configuration.md) | Environment variables and GitHub Actions secrets |
+| [docs/deployment.md](docs/deployment.md) | Coolify deploy path, adding tokens, networking, volumes |
 | [docs/cicd.md](docs/cicd.md) | GitHub Actions pipeline, image tags, known limitations |
-| [docs/tokens.md](docs/tokens.md) | Current token list, how to add/revoke agents |
+| [docs/tokens.md](docs/tokens.md) | Configured agent token variable names, how to add/revoke agents |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | Common problems and how to fix them |
 | [docs/gotchas.md](docs/gotchas.md) | Things that will bite you — read before making changes |
 | [docs/claude-desktop-setup.md](docs/claude-desktop-setup.md) | Claude desktop (Cowork) on Windows — mcp-remote + PowerShell setup script |
+| [docs/1password.md](docs/1password.md) | Pull secrets from 1Password via the MCP server or `op` CLI instead of hardcoding |
 
 ---
 
@@ -68,6 +72,27 @@ PR/apply flow.
 
 ## Available tools
 
+The server keeps the MCP tool list small. Clients see five always-on tools:
+
+| Tool | What it does |
+|---|---|
+| `health` | Server info, registered agents, visible tools, and discoverable operations |
+| `list_capabilities` | Browse the hidden operation catalog by category or safety class without invoking anything |
+| `get_capability_details` | Return one operation's full contract, args, examples, safety metadata, and related operations |
+| `tool_search` | Search the hidden operation registry by keyword and return structured invocation guidance |
+| `invoke_tool` | Execute an operation discovered with `tool_search` |
+
+Operational tools are intentionally hidden from the always-on MCP schema list to
+reduce client context/tool overhead. Browse or search for the operation you need,
+optionally fetch details, then call `invoke_tool` with its exact name and
+arguments.
+
+The server also sends FastMCP session-level instructions telling clients to use
+this browse/search/detail -> `invoke_tool` flow before host, Docker, systemd,
+file, or audit-log tasks.
+
+## Discoverable operations
+
 | Tool | What it does |
 |---|---|
 | `run_command` | Run any shell command on the host (docker, systemctl, apt, etc.). Process group is SIGKILLed on timeout so `ssh` / pipelines can't orphan children. |
@@ -80,7 +105,6 @@ PR/apply flow.
 | `service_status` | Check systemd service status |
 | `service_action` | Start / stop / restart a systemd service |
 | `view_audit_log` | See who did what and when |
-| `health` | Server info and registered agents |
 
 ---
 
@@ -117,7 +141,7 @@ Every tool call is logged to `/audit/mcp-audit.log` inside the container (persis
 in the `mcp-audit` Docker volume). Each line is a JSON record:
 
 ```json
-{"ts": "2026-04-06T14:53:09Z", "agent": "claude", "tool": "run_command", "args": {"command": "docker ps"}, "ok": true, "duration_ms": 111}
+{"ts": "2026-04-06T14:53:09Z", "agent": "claude", "tool": "invoke_tool", "args": {"name": "run_command", "args": {"command": "docker ps"}}, "ok": true, "duration_ms": 111}
 ```
 
 To view recent activity, ask any connected AI: *"show me the last 50 audit log entries"*
@@ -160,4 +184,5 @@ The server detects it is inside a container via `/.dockerenv` and switches to ho
 mode automatically.
 
 Public traffic reaches the container through **Cloudflare Tunnel** (not Traefik).
-See [docs/architecture.md](docs/architecture.md) for the full diagram.
+See [docs/architecture.md](docs/architecture.md) for the full diagram. For future
+development work, start with [AGENTS.md](AGENTS.md).

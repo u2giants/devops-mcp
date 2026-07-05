@@ -12,11 +12,9 @@ GitHub Actions (.github/workflows/deploy.yml)
       ├── docker push ghcr.io/u2giants/devops-mcp:main
       ├── docker push ghcr.io/u2giants/devops-mcp:sha-<commit>
       │
-      └── SSH into VPS as ai@178.156.180.212
+      └── Call Coolify API /api/v1/deploy?uuid=<service_uuid>
             │
-            └── docker compose pull devops-mcp
-                docker compose up -d --no-deps devops-mcp
-                (updates ONLY devops-mcp — cloudflared/contextforge untouched)
+            └── Coolify pulls the latest GHCR :main image and redeploys the service
 ```
 
 Push to `main` is the only deployment action. No manual steps on the server.
@@ -34,12 +32,13 @@ Set on `u2giants/devops-mcp` (Settings → Secrets → Actions):
 
 | Secret | Value | Used for |
 |---|---|---|
-| `VPS_SSH_KEY` | Private key for `github-actions-devops-mcp` | SSH into VPS to run docker compose |
-| `VPS_HOST` | `178.156.180.212` | VPS IP for SSH |
+| `COOLIFY_API_TOKEN` | Coolify API token | Queue deployment after GHCR image push |
+| `COOLIFY_BASE_URL` | `https://coolify.designflow.app` | Coolify API base URL |
+| `COOLIFY_SERVICE_UUID` | `vj5f76xet05bxwdq4utw1kho` | Service/resource UUID to deploy |
+| `VPS_SSH_KEY` | Private key for `github-actions-devops-mcp` | Legacy SSH deploy path; currently unused |
+| `VPS_HOST` | `178.156.180.212` | Legacy SSH deploy path; currently unused |
 
 The corresponding public key is in `/home/ai/.ssh/authorized_keys` on the VPS.
-
-`GITHUB_TOKEN` is automatic — no setup needed. Used to push to GHCR.
 
 `GITHUB_TOKEN` is automatic — no setup needed. Used to push to GHCR.
 
@@ -67,8 +66,9 @@ No code change or push needed for token changes.
 The workflow uses GitHub Actions cache (`type=gha`) for Docker layer caching.
 Unchanged layers build in seconds. First build after a long gap is ~2 min.
 
-## Upcoming: Node.js deprecation (deadline: June 2026)
+## GitHub Actions runtime warning
 
-The workflow uses `docker/build-push-action@v6`, `docker/login-action@v3`, and
-`docker/setup-buildx-action@v3` which run on Node.js 20. GitHub forces Node.js 24
-starting June 2, 2026. Update these to v7+/v4+/v4+ before then.
+If GitHub Actions warns that one of the marketplace actions is still running on a
+deprecated Node.js runtime, bump the affected action versions and rerun the
+workflow. Keep the deploy flow itself the same: build/push GHCR, then call the
+Coolify API.

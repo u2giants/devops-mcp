@@ -158,7 +158,7 @@ After the next deploy, run:
 ```bash
 # Should return in ~2s, not ~30s:
 curl -s -H "Authorization: Bearer $TOKEN" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"run_command","arguments":{"command":"sleep 30 | sleep 30 | cat","timeout":2}}}' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"invoke_tool","arguments":{"name":"run_command","args":{"command":"sleep 30 | sleep 30 | cat","timeout":2}}}}' \
   https://mcp.designflow.app/mcp
 
 # read_file on a multi-MB log file should now return quickly without OOM:
@@ -269,30 +269,15 @@ docker logs devops-mcp-vj5f76xet05bxwdq4utw1kho 2>&1 | tail -30
 
 ## HTTPS not working / SSL error
 
-**Symptom:** Browser shows certificate error or connection refused on port 443.
+**Symptom:** Browser shows a certificate error, connection refused, or Cloudflare
+edge error for `mcp.designflow.app`.
 
-1. **Check Traefik is running:**
-   ```bash
-   docker ps --filter name=coolify-proxy
-   ```
+Public traffic reaches this service through Cloudflare Tunnel, not Traefik. Check:
 
-2. **Check Traefik picked up the container's labels:**
-   ```bash
-   # Traefik dashboard (if enabled) at http://178.156.180.212:8080
-   # Or check Traefik logs:
-   docker logs coolify-proxy 2>&1 | grep -i "mcp\|designflow" | tail -20
-   ```
-
-3. **Check the container is on the coolify network:**
-   ```bash
-   docker inspect devops-mcp-vj5f76xet05bxwdq4utw1kho \
-     --format '{{json .NetworkSettings.Networks}}' | python3 -m json.tool
-   # Should show "coolify" network with an IP address
-   ```
-
-4. **Let's Encrypt rate limit.** If you've been recreating the container and
-   requesting new certificates repeatedly, Let's Encrypt may have rate-limited you.
-   Wait and try again. The certificate is cached in Traefik's volume once issued.
+1. Cloudflare DNS has `mcp.designflow.app` as a proxied CNAME to the tunnel.
+2. The `cloudflared` sidecar is running in the Coolify service.
+3. The `devops-mcp` container is listening on port `8765`.
+4. The tunnel token in Coolify (`CLOUDFLARE_TUNNEL_TOKEN`) is valid.
 
 ---
 
@@ -312,7 +297,8 @@ curl ... -d '{"method":"tools/call","params":{"name":"health","arguments":{}}}' 
 - Container started without `--pid host` — nsenter can't reach host PID 1
 - Container started without `--privileged` — nsenter is denied permission
 
-Re-run the full `docker run` command from [deployment.md](deployment.md) with all flags.
+Check `docker-compose.yml` and the Coolify service configuration. The production
+container must have `privileged: true`, `pid: host`, and the `/host` mount.
 
 ---
 
@@ -325,7 +311,8 @@ the file exists on the host.
 ```bash
 docker exec devops-mcp-vj5f76xet05bxwdq4utw1kho ls /host/etc/nginx/
 ```
-If this fails, the `/:/host` volume isn't mounted. Re-run the `docker run` command.
+If this fails, the `/:/host` volume is not mounted. Check `docker-compose.yml` and
+the Coolify service configuration.
 
 ---
 
@@ -355,10 +342,8 @@ Should show `vj5f76xet05bxwdq4utw1kho_mcp-audit`. If missing, the volume was del
 
 **Symptom:** Getting 403 "Invalid token" with a token you just added.
 
-Tokens are loaded at container startup only. Adding a new `TOKEN_*` env var to
-Coolify does not take effect until the container is restarted with that env var
-in the `docker run` command. Simply restarting via Coolify UI is not enough —
-you must re-run the full `docker run` command with the new token included.
+Tokens are loaded at process startup. Adding a new `TOKEN_*` env var in Coolify
+does not take effect until the DevOps MCP service is restarted or redeployed.
 
 ---
 
@@ -374,24 +359,19 @@ caching.
 
 ## CI built successfully but site didn't update
 
-GitHub Actions pushes a new image to GHCR and calls the Coolify restart API. The
-Coolify restart restarts the *existing* container — it does not pull the new image.
+GitHub Actions pushes a new image to GHCR and calls the Coolify deploy API. If the
+site did not update, check the latest workflow run first, then check the Coolify
+deployment/logs for whether it pulled `ghcr.io/u2giants/devops-mcp:main`.
 
-To actually deploy the new image:
-```bash
-docker pull ghcr.io/u2giants/devops-mcp:main
-# then re-run the full docker run command
-```
-
-See [cicd.md](cicd.md) for full explanation.
+See [cicd.md](cicd.md) for the current pipeline.
 
 ---
 
 ## Container appears in Coolify but shows wrong status
 
-Coolify shows the status it last knew about, which may lag. Its "restart" button
-will restart the existing container (not pull new image). Use the Coolify UI for
-visibility only — use `docker ps` and the `docker run` command for actual management.
+Coolify shows the status it last knew about, which may lag. Use the Coolify UI
+logs/deployments view and the GitHub Actions run to confirm whether the new image
+was pulled and the service recreated.
 
 ---
 
@@ -402,7 +382,6 @@ If the container is gone and needs to be rebuilt from scratch:
 1. Make sure the GHCR image is available (or rebuild it):
    ```bash
    docker pull ghcr.io/u2giants/devops-mcp:main
-   # or: cd /home/ai/devops-mcp && docker build -t ghcr.io/u2giants/devops-mcp:main .
    ```
 
 2. Make sure the `coolify` network exists:
@@ -410,7 +389,8 @@ If the container is gone and needs to be rebuilt from scratch:
    docker network create coolify 2>/dev/null || true
    ```
 
-3. Re-run the full `docker run` command from [deployment.md](deployment.md).
+3. Trigger a Coolify redeploy, or use Coolify terminal only for exceptional
+   recovery if the service definition itself has been lost.
 
 4. Verify with `curl https://mcp.designflow.app/`.
 
