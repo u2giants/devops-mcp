@@ -794,7 +794,10 @@ def tool_search(query: str, limit: int = 8) -> dict[str, Any]:
 
 
 @_tool
-def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+def invoke_tool(
+    name: str,
+    args: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
     """
     Execute a hidden DevOps operation discovered with tool_search.
     Pass the exact operation name and its arguments as a JSON object. If you do
@@ -808,10 +811,21 @@ def invoke_tool(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]
             "nearby_matches": _close_operation_names(name),
             "hint": "Call tool_search, list_capabilities, or get_capability_details with an exact operation name.",
         }
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except json.JSONDecodeError as exc:
+            return {
+                "ok": False,
+                "error": f"args must be an object or a JSON-encoded object: {exc.msg}",
+            }
     if args is None:
         args = {}
     if not isinstance(args, dict):
-        return {"ok": False, "error": "args must be an object"}
+        return {
+            "ok": False,
+            "error": "args must be an object or a JSON-encoded object",
+        }
 
     try:
         return spec["fn"](**args)
