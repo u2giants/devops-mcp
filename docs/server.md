@@ -228,8 +228,11 @@ structured operation contracts and explicit `invoke_tool(...)` shapes. Use this
 before calling `invoke_tool` unless you already know the exact operation name.
 
 ### `invoke_tool(name, args)`
-Executes an operation discovered with `tool_search`. `args` must be a JSON object
-matching the target operation parameters.
+Executes an operation discovered with `tool_search`. `args` may be a native JSON
+object or a JSON-encoded object string matching the target operation parameters.
+The string form is accepted because some MCP clients and gateways stringify
+nested tool arguments before forwarding them. Arrays, scalar values, and malformed
+JSON remain rejected.
 
 ### Discoverable operations
 
