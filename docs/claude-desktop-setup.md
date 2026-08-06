@@ -56,7 +56,7 @@ if (-not $config.mcpServers) {
 $config.mcpServers | Add-Member -NotePropertyName "devops-mcp" -NotePropertyValue ([PSCustomObject]@{
     command = "C:\PROGRA~1\nodejs\npx.cmd"
     args = @(
-        "-y", "mcp-remote@latest",
+        "-y", "mcp-remote@0.1.38",
         "https://mcp.designflow.app/mcp",
         "--header", "Authorization: Bearer REPLACE_WITH_TOKEN_ROOCODE"
     )
@@ -66,7 +66,7 @@ $config.mcpServers | Add-Member -NotePropertyName "devops-mcp" -NotePropertyValu
 $config.mcpServers | Add-Member -NotePropertyName "synology-monitor" -NotePropertyValue ([PSCustomObject]@{
     command = "C:\PROGRA~1\nodejs\npx.cmd"
     args = @(
-        "-y", "mcp-remote@latest",
+        "-y", "mcp-remote@0.1.38",
         "https://nas-mcp.designflow.app/mcp",
         "--transport", "http",
         "--header", "Authorization: Bearer REPLACE_WITH_NAS_BEARER_TOKEN"

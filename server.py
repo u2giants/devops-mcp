@@ -33,7 +33,7 @@ from typing import Any
 import uvicorn
 from dependency_versions import dependency_versions
 from fastmcp import FastMCP
-from fastmcp.server.middleware import Middleware as McpMiddleware, MiddlewareContext
+from fastmcp.server.middleware import Middleware as McpMiddleware
 from starlette.middleware import Middleware as ASGIMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -48,6 +48,9 @@ from starlette.types import ASGIApp
 
 HOST_ROOT = os.environ.get("HOST_ROOT", "/host")
 AUDIT_LOG_PATH = os.environ.get("AUDIT_LOG_PATH", "/audit/mcp-audit.log")
+TRANSPORT_ACCESS_LOG_PATH = os.environ.get(
+    "TRANSPORT_ACCESS_LOG_PATH", "/audit/mcp-transport-access.log"
+)
 MAX_OUTPUT = int(os.environ.get("MAX_OUTPUT_CHARS", "60000"))
 DEFAULT_TIMEOUT = int(os.environ.get("DEFAULT_TIMEOUT", "120"))
 ANSIBLE_POLICY_MODE = os.environ.get("ANSIBLE_POLICY_MODE", "warn").lower()
@@ -72,6 +75,7 @@ class ServerConfig:
 
     tokens: dict[str, str] = field(default_factory=dict)
     audit_log_path: str | None = None
+    transport_access_log_path: str | None = None
     test_mode: bool = False
 
     @classmethod
@@ -79,6 +83,7 @@ class ServerConfig:
         return cls(
             tokens=_tokens_from_env(),
             audit_log_path=AUDIT_LOG_PATH,
+            transport_access_log_path=TRANSPORT_ACCESS_LOG_PATH,
             test_mode=os.environ.get("MCP_TEST_MODE", "").lower() in {"1", "true", "yes"},
         )
 
@@ -102,6 +107,10 @@ audit_logger.setLevel(logging.INFO)
 audit_logger.propagate = False
 
 _audit_handler: logging.Handler | None = None
+transport_access_logger = logging.getLogger("transport_access")
+transport_access_logger.setLevel(logging.INFO)
+transport_access_logger.propagate = False
+_transport_access_handler: logging.Handler | None = None
 
 
 def _configure_audit_logger(path: str | None) -> None:
@@ -122,6 +131,24 @@ def _configure_audit_logger(path: str | None) -> None:
     _audit_handler = handler
 
 
+def _configure_transport_access_logger(path: str | None) -> None:
+    """Open the privacy-safe transport log only at application startup."""
+    global _transport_access_handler
+    if _transport_access_handler is not None:
+        transport_access_logger.removeHandler(_transport_access_handler)
+        _transport_access_handler.close()
+        _transport_access_handler = None
+    if not path:
+        return
+    log_dir = os.path.dirname(path)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+    handler = logging.FileHandler(path)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    transport_access_logger.addHandler(handler)
+    _transport_access_handler = handler
+
+
 def _audit(agent: str, tool: str, args: dict | None, ok: bool, duration_ms: int,
            error: str | None = None) -> None:
     entry = {
@@ -140,6 +167,40 @@ def _audit(agent: str, tool: str, args: dict | None, ok: bool, duration_ms: int,
 # ---------------------------------------------------------------------------
 # ASGI auth middleware — checks Bearer token on every HTTP request
 # ---------------------------------------------------------------------------
+
+def _normalized_transport_route(path: str) -> str:
+    """Return a fixed route label without retaining caller-controlled path data."""
+    if path == "/":
+        return "/"
+    if path == "/status" or path.startswith("/status/"):
+        return "/status"
+    if path == "/mcp" or path.startswith("/mcp/"):
+        return "/mcp"
+    if path == "/sse/messages" or path.startswith("/sse/messages/"):
+        return "/sse/messages"
+    if path == "/sse" or path.startswith("/sse/"):
+        return "/sse"
+    return "/other"
+
+
+class TransportAccessMiddleware(BaseHTTPMiddleware):
+    """Record transport use without queries, headers, bodies, tokens, or args."""
+
+    async def dispatch(self, request: Request, call_next):
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+            return response
+        finally:
+            entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "event": "transport_access",
+                "method": request.method.upper(),
+                "route": _normalized_transport_route(request.url.path),
+                "status": status,
+            }
+            transport_access_logger.info(json.dumps(entry))
 
 PUBLIC_PATHS = {"/", "/status"}
 # SSE message POSTs are session-authenticated by the MCP transport itself
@@ -1401,6 +1462,7 @@ def create_app(config: ServerConfig | None = None) -> Starlette:
             "Set MCP_TEST_MODE=true only for isolated tests."
         )
     _configure_audit_logger(config.audit_log_path)
+    _configure_transport_access_logger(config.transport_access_log_path)
     asgi_middleware = []
     if config.tokens:
         asgi_middleware.append(ASGIMiddleware(AuthMiddleware, tokens=config.tokens))
@@ -1422,7 +1484,7 @@ def create_app(config: ServerConfig | None = None) -> Starlette:
             Mount("/sse", app=sse_app),
             Mount("/", app=mcp_app),
         ],
-        middleware=asgi_middleware,
+        middleware=[ASGIMiddleware(TransportAccessMiddleware), *asgi_middleware],
         lifespan=mcp_app.lifespan,
     )
     return app

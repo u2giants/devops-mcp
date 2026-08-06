@@ -48,6 +48,7 @@ async def test_visible_tool_surface_is_small_and_deterministic():
 
 def test_import_does_not_create_audit_handler_or_application():
     assert server._audit_handler is None
+    assert server._transport_access_handler is None
     assert not hasattr(server, "app")
 
 

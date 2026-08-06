@@ -131,6 +131,13 @@ every tool call. It records:
 Written as JSON lines to `/audit/mcp-audit.log`, which is in a named Docker volume
 (`vj5f76xet05bxwdq4utw1kho_mcp-audit`) that survives container restarts.
 
+The same durable volume contains `/audit/mcp-transport-access.log`. This separate
+privacy-safe record exists only to measure transport retirement. It stores a UTC
+timestamp, HTTP method, fixed normalized route label, and response status. It never stores query
+strings, headers, tokens, bodies, tool arguments, or caller-controlled path
+segments. A seven-day `/sse` retirement window begins only after deployment and
+proof that this file survives a container replacement.
+
 ### 6. Two middleware layers — how they communicate
 
 There's a subtlety: auth happens at the HTTP (ASGI) layer, but audit logging happens

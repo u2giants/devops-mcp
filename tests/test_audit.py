@@ -4,6 +4,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.testclient import TestClient
 
 import server
 
@@ -64,3 +69,49 @@ def test_audit_entry_is_structured_json_without_cross_request_state():
         "ok": True,
         "duration_ms": 2,
     }
+
+
+def test_transport_access_log_excludes_all_request_secrets():
+    async def ok(_request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(
+        routes=[Route("/sse/messages/private-segment", ok, methods=["POST"])],
+        middleware=[Middleware(server.TransportAccessMiddleware)],
+    )
+    messages = []
+    with patch.object(server.transport_access_logger, "info", side_effect=messages.append):
+        response = TestClient(app).post(
+            "/sse/messages/private-segment?token=query-secret",
+            headers={"Authorization": "Bearer header-secret"},
+            json={"argument": "body-secret"},
+        )
+
+    assert response.status_code == 200
+    entry = json.loads(messages[0])
+    assert entry == {
+        "ts": entry["ts"],
+        "event": "transport_access",
+        "method": "POST",
+        "route": "/sse/messages",
+        "status": 200,
+    }
+    assert all(
+        secret not in messages[0]
+        for secret in ("query-secret", "header-secret", "body-secret", "private-segment")
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        ("/", "/"),
+        ("/status/details", "/status"),
+        ("/mcp/session-id", "/mcp"),
+        ("/sse/sse", "/sse"),
+        ("/sse/messages/session-id", "/sse/messages"),
+        ("/token-in-path", "/other"),
+    ],
+)
+def test_transport_route_normalization(path, expected):
+    assert server._normalized_transport_route(path) == expected

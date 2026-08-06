@@ -1,5 +1,26 @@
 # Architecture Decisions
 
+## 2026-08-06: Legacy transport retirement requires a new evidence window
+
+The legacy `/sse` transport and `?token=` authentication remain enabled. The
+production application and tunnel containers were recreated on 2026-08-06, and
+neither retained seven days of request paths. The proxy also had no access log,
+so zero legitimate `/sse` use could not be proven.
+
+The application now writes a separate JSON-lines transport record to
+`/audit/mcp-transport-access.log` in the existing durable audit volume. Each
+record contains only a UTC timestamp, event name, HTTP method, one fixed
+normalized route label, and the HTTP response status. The status distinguishes
+successful legacy use from unauthenticated scanning. It never records query strings, headers, tokens, request
+bodies, tool arguments, or caller-controlled path segments.
+
+The seven-day retirement window starts only after the version containing this
+record is deployed and a read-only production check proves records survive a
+container replacement. Count every normalized `/sse` and `/sse/messages` record
+for seven complete consecutive days. Do not remove SSE or query-token auth unless
+that deployed window contains zero legitimate SSE use and managed client config
+searches also contain no active SSE caller.
+
 ## 2026-04-08: Windsurf/Roo MCP Compatibility — SSE Transport + Query-Param Auth
 
 ### Context
