@@ -60,10 +60,10 @@ Report the exact runtime framework versions used by health metadata and CI:
 uv run python dependency_versions.py
 ```
 
-Run the baseline tests:
+Run the locked unit and protocol test suite:
 
 ```sh
-AUDIT_LOG_PATH=/tmp/devops-mcp-audit.log uv run python -m unittest discover -v
+uv run pytest -q
 ```
 
 Import and inspect the small tool surface:
@@ -97,7 +97,7 @@ For an intentional upgrade:
 3. Run `uv lock --upgrade-package <package>` and review the complete `uv.lock` diff.
 4. Run `uv sync --locked`.
 5. Run `uv run python dependency_versions.py` and confirm the intended versions.
-6. Run `uv run python -m unittest discover -v` and the protocol suite once it is added.
+6. Run `uv run pytest -q`.
 7. Run `docker build --no-cache -t devops-mcp:lock-check .` before committing.
 
 If `pyproject.toml` changes without a matching lock refresh, `uv sync --locked`

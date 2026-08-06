@@ -34,10 +34,8 @@ jobs:
       - name: Report dependency versions
         run: uv run python dependency_versions.py
 
-      - name: Run baseline tests
-        env:
-          AUDIT_LOG_PATH: /tmp/devops-mcp-audit.log
-        run: uv run python -m unittest discover -v
+      - name: Run locked unit and protocol tests
+        run: uv run pytest -q
 
   build-and-push:
     needs: test

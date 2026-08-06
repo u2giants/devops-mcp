@@ -24,6 +24,7 @@ import shlex
 import signal
 import subprocess
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from itertools import islice
 from pathlib import Path
@@ -57,14 +58,32 @@ ANSIBLE_REPO = os.environ.get("ANSIBLE_REPO", "/worksp/ansible")
 # e.g. TOKEN_CLAUDE=abc123 => {"abc123": "claude"}
 # ---------------------------------------------------------------------------
 
-TOKENS: dict[str, str] = {}
-for key, value in os.environ.items():
-    if key.startswith("TOKEN_") and value:
-        agent_name = key[6:].lower()  # TOKEN_CLAUDE -> claude
-        TOKENS[value] = agent_name
+def _tokens_from_env(environ: dict[str, str] | os._Environ[str] = os.environ) -> dict[str, str]:
+    return {
+        value: key[6:].lower()
+        for key, value in environ.items()
+        if key.startswith("TOKEN_") and value.strip()
+    }
 
-if not TOKENS:
-    logging.warning("No TOKEN_* environment variables set — server has no auth!")
+
+@dataclass(frozen=True)
+class ServerConfig:
+    """Runtime settings. Tests inject these instead of mutating production state."""
+
+    tokens: dict[str, str] = field(default_factory=dict)
+    audit_log_path: str | None = None
+    test_mode: bool = False
+
+    @classmethod
+    def from_env(cls) -> "ServerConfig":
+        return cls(
+            tokens=_tokens_from_env(),
+            audit_log_path=AUDIT_LOG_PATH,
+            test_mode=os.environ.get("MCP_TEST_MODE", "").lower() in {"1", "true", "yes"},
+        )
+
+
+TOKENS = _tokens_from_env()
 
 # ---------------------------------------------------------------------------
 # Context variable to carry agent identity from HTTP layer to MCP layer
@@ -82,13 +101,25 @@ audit_logger = logging.getLogger("audit")
 audit_logger.setLevel(logging.INFO)
 audit_logger.propagate = False
 
-_audit_dir = os.path.dirname(AUDIT_LOG_PATH)
-if _audit_dir:
-    os.makedirs(_audit_dir, exist_ok=True)
+_audit_handler: logging.Handler | None = None
 
-_audit_handler = logging.FileHandler(AUDIT_LOG_PATH, encoding="utf-8")
-_audit_handler.setFormatter(logging.Formatter("%(message)s"))
-audit_logger.addHandler(_audit_handler)
+
+def _configure_audit_logger(path: str | None) -> None:
+    """Open the audit file only at application startup, never during import."""
+    global _audit_handler
+    if _audit_handler is not None:
+        audit_logger.removeHandler(_audit_handler)
+        _audit_handler.close()
+        _audit_handler = None
+    if path is None:
+        return
+    audit_dir = os.path.dirname(path)
+    if audit_dir:
+        os.makedirs(audit_dir, exist_ok=True)
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    audit_logger.addHandler(handler)
+    _audit_handler = handler
 
 
 def _audit(agent: str, tool: str, args: dict | None, ok: bool, duration_ms: int,
@@ -115,6 +146,10 @@ PUBLIC_PATHS = {"/", "/status"}
 PUBLIC_PREFIXES = ("/sse/messages",)
 
 class AuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app: ASGIApp, tokens: dict[str, str] | None = None):
+        super().__init__(app)
+        self.tokens = TOKENS if tokens is None else tokens
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
         if path in PUBLIC_PATHS or any(path.startswith(p) for p in PUBLIC_PREFIXES):
@@ -134,17 +169,19 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 headers={"WWW-Authenticate": 'Bearer realm="devops-mcp"'},
             )
 
-        agent = TOKENS.get(token)
+        agent = self.tokens.get(token)
         if agent is None:
             return JSONResponse(
                 {"error": "Invalid token"},
-                status_code=403,
-                headers={"WWW-Authenticate": 'Bearer realm="devops-mcp" error="invalid_token"'},
+                status_code=401,
+                headers={"WWW-Authenticate": 'Bearer realm="devops-mcp", error="invalid_token"'},
             )
 
-        current_agent.set(agent)
-        response = await call_next(request)
-        return response
+        context_token = current_agent.set(agent)
+        try:
+            return await call_next(request)
+        finally:
+            current_agent.reset(context_token)
 
 
 # ---------------------------------------------------------------------------
@@ -230,19 +267,46 @@ def _operation_category(name: str, description: str) -> str:
 
 
 def _operation_safety(name: str, description: str) -> dict[str, Any]:
+    explicit = {
+        "docker_action": "destructive",
+        "docker_logs": "read_only",
+        "docker_ps": "read_only",
+        "list_directory": "read_only",
+        "read_file": "read_only",
+        "run_command": "destructive",
+        "service_action": "state_changing",
+        "service_status": "read_only",
+        "view_audit_log": "read_only",
+        "write_file": "destructive",
+    }
+    classification = explicit.get(name, "unknown")
+    if classification != "unknown":
+        destructive = classification == "destructive"
+        state_changing = classification in {"destructive", "state_changing"}
+        return {
+            "classification": classification,
+            "read_only": classification == "read_only",
+            "state_changing": state_changing,
+            "destructive": destructive,
+            "preview_supported": False,
+            "reversible": not destructive,
+            "requires_confirmation": state_changing,
+            "boundary": "root-equivalent host access; inspect before changing state",
+        }
+
     text = f"{name} {description}".lower()
     destructive_terms = (" rm", "remove", "delete", "overwrite", "write/edit", "disable")
     state_terms = ("restart", "start", "stop", "reload", "enable", "disable", "write", "action", "manage", "rm")
     destructive = any(term in text for term in destructive_terms)
     state_changing = destructive or any(term in text for term in state_terms)
     return {
-        "classification": "destructive" if destructive else ("state_changing" if state_changing else "read_only"),
-        "read_only": not state_changing,
+        "classification": "unknown",
+        "read_only": False,
         "state_changing": state_changing,
         "destructive": destructive,
         "preview_supported": False,
         "reversible": not destructive,
-        "requires_confirmation": False,
+        "requires_confirmation": True,
         "boundary": "root-equivalent host access; inspect before changing state",
     }
 
@@ -611,6 +675,8 @@ def _run_on_host(
     waiting for orphaned pipes to close, which surfaces in MCP clients as a
     "hang" on long-running ssh / read_file / docker calls.
     """
+    # Preserve the current production ceiling until Step 9B. The 45-second
+    # ceiling may activate only after Step 10's durable operations exist.
     timeout = max(1, min(timeout, 600))
 
     if IN_CONTAINER:
@@ -1326,11 +1392,18 @@ async def status_page(request: Request) -> HTMLResponse:
     return HTMLResponse(html)
 
 
-def create_app() -> Starlette:
-    """Create the Starlette ASGI app with status page and auth middleware."""
+def create_app(config: ServerConfig | None = None) -> Starlette:
+    """Create the ASGI app without production side effects during import."""
+    config = config or ServerConfig.from_env()
+    if not config.tokens and not config.test_mode:
+        raise RuntimeError(
+            "No non-empty TOKEN_* bearer values configured. "
+            "Set MCP_TEST_MODE=true only for isolated tests."
+        )
+    _configure_audit_logger(config.audit_log_path)
     asgi_middleware = []
-    if TOKENS:
-        asgi_middleware.append(ASGIMiddleware(AuthMiddleware))
+    if config.tokens:
+        asgi_middleware.append(ASGIMiddleware(AuthMiddleware, tokens=config.tokens))
 
     # StreamableHTTP transport — for Claude Code CLI and modern MCP clients
     mcp_app = mcp.http_app(
@@ -1355,9 +1428,7 @@ def create_app() -> Starlette:
     return app
 
 
-app = create_app()
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "8765"))
     host = os.environ.get("BIND_HOST", "0.0.0.0")
-    uvicorn.run(app, host=host, port=port, log_level="info")
+    uvicorn.run(create_app(), host=host, port=port, log_level="info")
