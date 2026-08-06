@@ -357,8 +357,8 @@ run in production without tokens.
 ## Running outside Docker (development)
 
 ```bash
-pip install fastmcp uvicorn
-TOKEN_CLAUDE=devtoken HOST_ROOT=/ AUDIT_LOG_PATH=/tmp/audit.log python server.py
+uv sync --locked
+TOKEN_CLAUDE=devtoken HOST_ROOT=/ AUDIT_LOG_PATH=/tmp/audit.log uv run python server.py
 ```
 
 In this mode `IN_CONTAINER` is `False`, commands run directly without nsenter, and

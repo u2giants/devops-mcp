@@ -8,6 +8,11 @@ git push origin main
       ▼
 GitHub Actions (.github/workflows/deploy.yml)
       │
+      ├── install exactly from uv.lock
+      ├── report dependency versions
+      ├── run baseline tests
+      │     │
+      │     └── build is blocked unless tests pass
       ├── docker build
       ├── docker push ghcr.io/u2giants/devops-mcp:main
       ├── docker push ghcr.io/u2giants/devops-mcp:sha-<commit>
@@ -25,6 +30,10 @@ Push to `main` is the only deployment action. No manual steps on the server.
 - **No live edits on the server.** GitHub is the source of truth.
 - **Coolify pulls pre-built images.** It does not build from source.
 - **All secrets in GitHub Secrets.** Never in committed files.
+- **Locked dependencies only.** CI and Docker must fail when `pyproject.toml` and
+  `uv.lock` disagree.
+- **Tests before publishing.** The image job depends on the test job, so no GHCR
+  push or Coolify deployment can begin after a failed test.
 
 ## GitHub Secrets
 

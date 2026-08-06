@@ -35,7 +35,7 @@ Then load additional docs only when relevant:
 | Modify MCP server behavior or project-owned code | `AGENTS.md`, `docs/server.md`, `docs/architecture.md` if system design is affected | `docs/deployment.md` unless deploy behavior changes |
 | Add, remove, or change hidden operations or visible tools | `AGENTS.md`, `docs/server.md`, `README.md` | Client setup docs unless endpoint/auth changes |
 | Add or change configuration, env vars, feature flags, secrets, or runtime settings | `AGENTS.md`, `docs/configuration.md`, `docs/deployment.md` if prod/runtime env is affected | `docs/architecture.md` unless architecture changes |
-| Change local setup, test/debug workflow, package dependencies, or tooling | `AGENTS.md`, `docs/development.md`, `requirements.txt`, `Dockerfile` if runtime changes | `docs/deployment.md` unless CI/CD changes |
+| Change local setup, test/debug workflow, package dependencies, or tooling | `AGENTS.md`, `docs/development.md`, `pyproject.toml`, `uv.lock`, `Dockerfile` if runtime changes | `docs/deployment.md` unless CI/CD changes |
 | Change deployment, Docker, CI/CD, hosting, release flow, rollback, or runtime environment | `AGENTS.md`, `docs/deployment.md`, `docs/cicd.md`, `docs/configuration.md`, `.github/workflows/deploy.yml`, `docker-compose.yml` | Local-only development docs unless needed |
 | Investigate bugs, production incidents, Cloudflare/Coolify problems, hangs, or auth failures | `AGENTS.md`, `docs/troubleshooting.md`, `docs/gotchas.md`, relevant architecture/deployment docs, `HANDOFF.md` if present | Client setup docs unless client config is involved |
 | Continue unfinished work | `AGENTS.md`, `HANDOFF.md`, relevant docs named inside `HANDOFF.md` | Docs unrelated to the handoff scope |
@@ -63,7 +63,7 @@ Generated / runtime:
 
 Third-party / vendor / framework:
 
-- Python packages from `requirements.txt`
+- Python packages declared in `pyproject.toml` and resolved in `uv.lock`
 - Docker base image `python:3.12-slim`
 - Sidecar image `ghcr.io/ibm/mcp-context-forge:1.0.0-RC2`
 - Sidecar image `cloudflare/cloudflared:latest`
@@ -93,7 +93,7 @@ Our custom code lives here:
 - `server.py`
 - `docs/`
 - `.github/workflows/`
-- root project docs/config files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `docker-compose.yml`, `Dockerfile`, `requirements.txt`
+- root project docs/config files such as `README.md`, `AGENTS.md`, `CLAUDE.md`, `docker-compose.yml`, `Dockerfile`, `pyproject.toml`, and `uv.lock`
 
 Everything else requires justification before touching. Do not scatter project
 logic into generated caches, local virtualenvs, vendored package directories, or

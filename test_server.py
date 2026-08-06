@@ -3,6 +3,19 @@ import unittest
 from fastmcp import Client
 
 import server
+from dependency_versions import dependency_versions
+
+
+class DependencyVersionTests(unittest.TestCase):
+    def test_reports_pinned_runtime_dependencies(self):
+        versions = dependency_versions()
+
+        self.assertEqual(versions["fastmcp"], "3.4.4")
+        self.assertEqual(versions["uvicorn"], "0.51.0")
+        self.assertEqual(versions["starlette"], "1.3.1")
+
+    def test_health_uses_dependency_version_report(self):
+        self.assertEqual(server.health()["dependencies"], dependency_versions())
 
 
 class InvokeToolArgsCompatibilityTests(unittest.TestCase):

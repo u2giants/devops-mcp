@@ -8,6 +8,11 @@ GitHub Actions and pushed to GHCR — Coolify pulls it, it does not build.
 
 **To deploy:** push to `main`. That's it. See [cicd.md](cicd.md).
 
+The workflow first installs from the committed `uv.lock`, reports the runtime
+dependency versions, and runs the baseline tests. It builds and publishes an
+image only after that prerequisite job succeeds. Docker also installs with
+`uv sync --locked`, so a stale lockfile stops both CI and image builds.
+
 ---
 
 ## Coolify service

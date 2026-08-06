@@ -63,3 +63,11 @@ Set on `u2giants/devops-mcp`.
 
 Legacy SSH secrets may still exist in GitHub, but the current workflow does not
 use them.
+
+## Dependency configuration
+
+Runtime and test dependencies are declared with exact direct versions in
+`pyproject.toml`; the complete resolved environment is committed in `uv.lock`.
+These are build inputs, not runtime environment variables. Do not add package
+versions to Coolify or install packages when the container starts. Follow the
+intentional upgrade procedure in `docs/development.md`.

@@ -153,6 +153,9 @@ To view recent activity, ask any connected AI: *"show me the last 50 audit log e
 Push to `main` → GitHub Actions builds and pushes to GHCR → Coolify restarts the
 container with the new image. No branches, no PRs.
 
+CI installs only from the committed `uv.lock` and runs tests before it can build
+or publish an image.
+
 - Image: `ghcr.io/u2giants/devops-mcp:main`
 - Also tagged: `ghcr.io/u2giants/devops-mcp:sha-<commit>`
 

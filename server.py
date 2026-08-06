@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
+from dependency_versions import dependency_versions
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware as McpMiddleware, MiddlewareContext
 from starlette.middleware import Middleware as ASGIMiddleware
@@ -696,6 +697,7 @@ def health() -> dict[str, Any]:
     """Server health and configuration. Call this first to understand the server."""
     return {
         "server": "devops-mcp",
+        "dependencies": dependency_versions(),
         "agent": current_agent.get(),
         "in_container": IN_CONTAINER,
         "registered_agents": list(TOKENS.values()),
