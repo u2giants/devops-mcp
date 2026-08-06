@@ -1,0 +1,269 @@
+{
+  "fixtureVersion": 1,
+  "capturedAt": "2026-08-06T15:26:27Z",
+  "service": "devops-mcp",
+  "endpoint": "https://mcp.designflow.app/mcp",
+  "source": {
+    "repository": "https://github.com/u2giants/devops-mcp",
+    "branch": "main",
+    "commit": "cfdd6a66dc364a4351d8c35bc364583d605bbc0d",
+    "workflowRun": "https://github.com/u2giants/devops-mcp/actions/runs/30112078991"
+  },
+  "productionImage": {
+    "reference": "ghcr.io/u2giants/devops-mcp:main",
+    "digest": "sha256:28bbb27c1a3e7398c88b773a310dc16f734f40c3a57b4287d4155d06702d0602",
+    "sourceCommitEvidence": "The successful workflow for the source commit published an immutable sha-cfdd6a66dc364a4351d8c35bc364583d605bbc0d tag with this digest. Read-only production docker inspect reported the same digest for the running container.",
+    "liveBuildShaExposure": "not-exposed-by-current-health-response"
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "framework": {
+      "package": "fastmcp",
+      "version": "3.4.4"
+    },
+    "transitiveOfficialSdk": {
+      "package": "mcp",
+      "version": "1.28.1"
+    },
+    "transport": {
+      "package": "uvicorn",
+      "version": "0.51.0"
+    },
+    "asgi": {
+      "package": "starlette",
+      "version": "1.3.1"
+    }
+  },
+  "clientAndLegacyTransportEvidence": {
+    "contextForge": {
+      "configured": true,
+      "transport": "STREAMABLEHTTP",
+      "target": "http://devops-mcp:8765/mcp",
+      "evidence": "docker-compose.yml contextforge-register service",
+      "observedCallingProduction": "not-proven-by-this-read-only-baseline"
+    },
+    "documentedClients": [
+      {
+        "client": "Claude Desktop",
+        "transport": "Streamable HTTP through mcp-remote@latest",
+        "auth": "Authorization bearer header",
+        "evidence": "docs/claude-desktop-setup.md"
+      },
+      {
+        "client": "Roo Code",
+        "transport": "Streamable HTTP",
+        "auth": "Authorization bearer header or legacy query parameter",
+        "evidence": "docs/windsurf-roo-setup.md"
+      },
+      {
+        "client": "Windsurf",
+        "transport": "Streamable HTTP",
+        "auth": "legacy query parameter",
+        "evidence": "docs/windsurf-roo-setup.md"
+      }
+    ],
+    "legacySse": {
+      "mountedAt": "/sse",
+      "supportedClientStillUsesIt": "not-proven",
+      "documentationSays": "Roo Code and Windsurf use /mcp and SSE is not used"
+    }
+  },
+  "responseEncoding": {
+    "authenticatedMcpStatus": 200,
+    "contentType": "text/event-stream",
+    "shape": "event: message followed by one JSON-RPC data line"
+  },
+  "cases": [
+    {
+      "id": "MCP20260728-001-discover-supported-revisions",
+      "replayPolicy": "intentional-cutover-change",
+      "request": {
+        "method": "server/discover",
+        "params": {
+          "protocolVersion": "2026-07-28",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "baseline-probe",
+            "version": "1.0.0"
+          }
+        }
+      },
+      "currentResponse": {
+        "httpStatus": 200,
+        "jsonRpcErrorCode": -32602,
+        "message": "Invalid request parameters"
+      },
+      "migrationExpectation": "Must become a successful July 28 discovery response. The current failure is historical evidence, not a parity gate."
+    },
+    {
+      "id": "MCP20260728-003-supported-legacy-client-initializes",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "baseline-probe",
+            "version": "1.0.0"
+          }
+        }
+      },
+      "expected": {
+        "httpStatus": 200,
+        "protocolVersion": "2025-06-18",
+        "serverInfo": {
+          "name": "devops-mcp",
+          "version": "3.4.4"
+        },
+        "capabilitiesInclude": [
+          "logging",
+          "prompts",
+          "resources",
+          "tools"
+        ]
+      }
+    },
+    {
+      "id": "MCP20260728-006-missing-static-bearer-challenge",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "tools/list",
+        "authorization": "missing"
+      },
+      "expected": {
+        "httpStatus": 401,
+        "wwwAuthenticate": "Bearer realm=\"devops-mcp\"",
+        "jsonBody": {
+          "error": "Missing auth: provide Authorization header or ?token= param"
+        }
+      }
+    },
+    {
+      "id": "MCP20260728-007-invalid-static-bearer-challenge",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "tools/list",
+        "authorization": "invalid synthetic bearer"
+      },
+      "expected": {
+        "httpStatus": 403,
+        "wwwAuthenticate": "Bearer realm=\"devops-mcp\" error=\"invalid_token\"",
+        "jsonBody": {
+          "error": "Invalid token"
+        }
+      }
+    },
+    {
+      "id": "MCP20260728-008-bogus-session-header-is-harmless",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "tools/list",
+        "headers": {
+          "Mcp-Session-Id": "deliberately-bogus-baseline-id"
+        }
+      },
+      "expected": {
+        "httpStatus": 200,
+        "visibleToolNames": [
+          "health",
+          "list_capabilities",
+          "get_capability_details",
+          "tool_search",
+          "invoke_tool"
+        ],
+        "sameResultAsRequestWithoutSessionHeader": true
+      }
+    },
+    {
+      "id": "MCP20260728-004-unsupported-version-error",
+      "replayPolicy": "intentional-cutover-change",
+      "request": {
+        "method": "initialize",
+        "params": {
+          "protocolVersion": "2099-01-01",
+          "capabilities": {},
+          "clientInfo": {
+            "name": "baseline-probe",
+            "version": "1.0.0"
+          }
+        }
+      },
+      "currentResponse": {
+        "httpStatus": 200,
+        "returnedSuccess": true,
+        "selectedProtocolVersion": "2025-11-25"
+      },
+      "migrationExpectation": "The July 28 contract suite must assert the official SDK's specified unsupported-version error. The current fallback success is not a parity gate."
+    },
+    {
+      "id": "MCP20260728-009-deterministic-cacheable-tools-list",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "tools/list",
+        "params": {}
+      },
+      "expected": {
+        "httpStatus": 200,
+        "visibleToolCount": 5,
+        "visibleToolNamesInOrder": [
+          "health",
+          "list_capabilities",
+          "get_capability_details",
+          "tool_search",
+          "invoke_tool"
+        ],
+        "canonicalResultSha256": "db7944bdee34a9fc594b5001f28169578efcb912d629a318545d48a5fba46bb7"
+      }
+    },
+    {
+      "id": "MCP20260728-010-result-type-and-server-info",
+      "replayPolicy": "legacy-parity",
+      "request": {
+        "method": "tools/call",
+        "params": {
+          "name": "health",
+          "arguments": {}
+        }
+      },
+      "expected": {
+        "httpStatus": 200,
+        "isError": false,
+        "contentType": "text",
+        "structuredContentFields": [
+          "server",
+          "agent",
+          "in_container",
+          "registered_agents",
+          "host_root",
+          "audit_log",
+          "ansible_policy_mode",
+          "ansible_repo",
+          "always_on_tools",
+          "available_operations",
+          "operation_categories",
+          "catalog_tools"
+        ],
+        "server": "devops-mcp",
+        "alwaysOnToolCount": 5,
+        "hiddenOperationNames": [
+          "docker_action",
+          "docker_logs",
+          "docker_ps",
+          "list_directory",
+          "read_file",
+          "run_command",
+          "service_action",
+          "service_status",
+          "view_audit_log",
+          "write_file"
+        ]
+      }
+    }
+  ],
+  "redaction": {
+    "containsBearerTokens": false,
+    "containsSecretValues": false,
+    "omittedVolatileAuthenticatedIdentity": true
+  }
+}
